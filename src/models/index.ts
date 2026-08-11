@@ -28,14 +28,18 @@ export interface Task {
   subTasks: SubTask[];
   requirementIds?: string[];
   phase?: string;
-  autoVerified?: boolean;
+  inProgress?: boolean;
+  queued?: boolean;
+  optional?: boolean;
 }
 
 export interface SubTask {
   title: string;
   completed: boolean;
   lineIndex: number;
-  autoVerified?: boolean;
+  inProgress?: boolean;
+  queued?: boolean;
+  optional?: boolean;
 }
 
 export interface PhaseProgress {

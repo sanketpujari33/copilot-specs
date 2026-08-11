@@ -102,6 +102,7 @@ function extractDesignExcerpt(content: string): string {
 export async function buildStartTaskPrompt(
   specName: string,
   taskId: string,
+  subTaskLineIndex?: number,
 ): Promise<string> {
   const { tasks } = await loadTasks(specName);
   const task = tasks.find((t) => t.id === taskId);
@@ -112,17 +113,64 @@ export async function buildStartTaskPrompt(
   const parts: string[] = [];
 
   // --- Header ---
-  parts.push(
-    `You are helping implement a specific task from the **${specName}** spec.`,
-    ``,
-    `## Task: ${task.id} — ${task.title}`,
-  );
+  let fileLines: string[] = [];
+  const tasksFileUri = tasksUri(specName);
+  if (tasksFileUri && (await fileExists(tasksFileUri))) {
+    const raw = await readTextFile(tasksFileUri);
+    fileLines = raw.split("\n");
+  }
 
-  if (task.subTasks.length > 0) {
-    parts.push(``, `### Sub-tasks`);
-    for (const sub of task.subTasks) {
-      const check = sub.completed ? "[x]" : "[ ]";
-      parts.push(`- ${check} ${sub.title}`);
+  // Helper to extract lines following a specific line index up to the next task/subtask/heading
+  const extractBody = (startIndex: number): string => {
+    if (startIndex < 0 || startIndex >= fileLines.length) return "";
+    const bodyLines: string[] = [];
+    const TASK_MARKER = /^(\s*)-\s+\[(x|X|\*|-|~| )\]/;
+    const HEADING_MARKER = /^###/;
+    for (let i = startIndex + 1; i < fileLines.length; i++) {
+      const line = fileLines[i];
+      if (TASK_MARKER.test(line) || HEADING_MARKER.test(line)) {
+        break;
+      }
+      bodyLines.push(line);
+    }
+    return bodyLines.join("\n").trim();
+  };
+
+  if (subTaskLineIndex !== undefined) {
+    const subTask = task.subTasks.find(s => s.lineIndex === subTaskLineIndex);
+    if (subTask) {
+      parts.push(
+        `You are helping implement a specific sub-task from the **${specName}** spec.`,
+        ``,
+        `## Sub-task: ${subTask.title}`,
+      );
+      const subBody = extractBody(subTask.lineIndex);
+      if (subBody) {
+        parts.push(``, subBody);
+      }
+      parts.push(``, `Part of Task: ${task.id} — ${task.title}`);
+    }
+  }
+
+  // Fallback to parent task header if no subtask is matched or provided
+  if (parts.length === 0) {
+    parts.push(
+      `You are helping implement a specific task from the **${specName}** spec.`,
+      ``,
+      `## Task: ${task.id} — ${task.title}`,
+    );
+
+    const taskBody = extractBody(task.lineIndex);
+    if (taskBody) {
+      parts.push(``, taskBody);
+    }
+
+    if (task.subTasks.length > 0) {
+      parts.push(``, `### Sub-tasks`);
+      for (const sub of task.subTasks) {
+        const check = sub.completed ? "[x]" : "[ ]";
+        parts.push(`- ${check} ${sub.title}`);
+      }
     }
   }
 
@@ -196,7 +244,7 @@ export async function buildRunAllTasksVerificationPrompt(
   const spec = await loadSpec(specName);
   let { tasks } = await loadTasks(specName);
   if (onlyRequired) {
-    tasks = tasks.filter((t) => t.autoVerified);
+    tasks = tasks.filter((t) => !t.optional);
   }
 
   const pending = tasks.filter((t) => !t.completed);

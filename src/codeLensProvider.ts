@@ -407,20 +407,30 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
         );
       }
 
-      const inProgress = this.isTaskInProgress(specName, task.id);
+      const inProgress = task.inProgress || this.isTaskInProgress(specName, task.id);
 
       if (inProgress) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: "$(sync~spin) In progress",
-            command: "",
-            tooltip: `Task ${task.id} is being worked on`,
+            title: task.optional ? "$(sync~spin) In progress (Optional)" : "$(sync~spin) In progress",
+            command: "copilot-specs.startTask",
+            arguments: [specName, task.id],
+            tooltip: `Resume task ${task.id} with Copilot`,
+          }),
+        );
+      } else if (task.queued) {
+        lenses.push(
+          new vscode.CodeLens(range, {
+            title: task.optional ? "$(clock) Queued (Optional)" : "$(clock) Queued",
+            command: "copilot-specs.startTask",
+            arguments: [specName, task.id],
+            tooltip: `Task ${task.id} is queued to start`,
           }),
         );
       } else if (task.completed) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: "$(pass-filled) Task completed",
+            title: task.optional ? "$(pass-filled) Task completed (Optional)" : "$(pass-filled) Task completed",
             command: "",
             tooltip: `Task ${task.id} is completed`,
           }),
@@ -434,21 +444,84 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
       } else if (!task.completed) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: "$(zap) Start task",
+            title: task.optional ? "$(zap) Start task (Optional)" : "$(zap) Start task",
             command: "copilot-specs.startTask",
             arguments: [specName, task.id],
             tooltip: `Start task ${task.id} with Copilot`,
-          }),
-          new vscode.CodeLens(range, {
-            title: task.autoVerified
-              ? "$(list-ordered) Make task optional"
-              : "$(list-ordered) Make task required",
-            command: "copilot-specs.toggleTaskRequired",
-            arguments: [specName, task.id],
-            tooltip: task.autoVerified
-              ? `Remove required flag (*) from task ${task.id}`
-              : `Make task ${task.id} required (*)`,
-          }),
+          })
+        );
+      }
+
+      // Always show the toggle for required/optional regardless of state
+      lenses.push(
+        new vscode.CodeLens(range, {
+          title: task.optional
+            ? "$(list-ordered) Make task required"
+            : "$(list-ordered) Make task optional",
+          command: "copilot-specs.toggleTaskRequired",
+          arguments: [specName, task.id],
+          tooltip: task.optional
+            ? `Make task ${task.id} required (remove *)`
+            : `Make task ${task.id} optional (add *)`,
+        })
+      );
+
+      // Add CodeLenses for subtasks
+      for (const sub of task.subTasks) {
+        const subLine = Math.max(
+          0,
+          Math.min(sub.lineIndex, document.lineCount - 1),
+        );
+        const subRange = new vscode.Range(subLine, 0, subLine, 0);
+
+        if (sub.inProgress) {
+          lenses.push(
+            new vscode.CodeLens(subRange, {
+              title: sub.optional ? "$(sync~spin) In progress (Optional)" : "$(sync~spin) In progress",
+              command: "copilot-specs.startTask",
+              arguments: [specName, task.id, sub.lineIndex],
+              tooltip: `Resume subtask ${sub.title} with Copilot`,
+            })
+          );
+        } else if (sub.queued) {
+          lenses.push(
+            new vscode.CodeLens(subRange, {
+              title: sub.optional ? "$(clock) Queued (Optional)" : "$(clock) Queued",
+              command: "copilot-specs.startTask",
+              arguments: [specName, task.id, sub.lineIndex],
+              tooltip: `Start subtask ${sub.title} with Copilot`,
+            })
+          );
+        } else if (sub.completed) {
+          lenses.push(
+            new vscode.CodeLens(subRange, {
+              title: sub.optional ? "$(pass-filled) Task completed (Optional)" : "$(pass-filled) Task completed",
+              command: "",
+            })
+          );
+        } else {
+          // Todo subtask
+          lenses.push(
+            new vscode.CodeLens(subRange, {
+              title: sub.optional ? "$(zap) Start task (Optional)" : "$(zap) Start task",
+              command: "copilot-specs.startTask",
+              arguments: [specName, task.id, sub.lineIndex],
+              tooltip: `Start subtask ${sub.title} with Copilot`,
+            })
+          );
+        }
+
+        lenses.push(
+          new vscode.CodeLens(subRange, {
+            title: sub.optional
+              ? "$(list-ordered) Make task required"
+              : "$(list-ordered) Make task optional",
+            command: "copilot-specs.toggleSubTaskRequired",
+            arguments: [specName, sub.lineIndex],
+            tooltip: sub.optional
+              ? `Make subtask required (remove *)`
+              : `Make subtask optional (add *)`,
+          })
         );
       }
     }

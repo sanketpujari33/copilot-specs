@@ -131,17 +131,31 @@ export class TaskItem extends vscode.TreeItem {
   constructor(public readonly task: Task) {
     super(task.title, vscode.TreeItemCollapsibleState.None);
     this.contextValue = task.completed ? "task-complete" : "task-incomplete";
-    this.iconPath = task.completed
-      ? new vscode.ThemeIcon(
-          "pass-filled",
-          new vscode.ThemeColor("charts.green"),
-        )
-      : new vscode.ThemeIcon(
-          "circle-large-outline",
-          new vscode.ThemeColor("charts.orange"),
-        );
-    this.description = task.id;
-    this.tooltip = `[${task.specName}] ${task.id}: ${task.title}`;
+    
+    if (task.completed) {
+      this.iconPath = new vscode.ThemeIcon(
+        "pass-filled",
+        new vscode.ThemeColor("charts.green"),
+      );
+    } else if (task.inProgress) {
+      this.iconPath = new vscode.ThemeIcon(
+        "sync~spin",
+        new vscode.ThemeColor("charts.blue"),
+      );
+    } else if (task.queued) {
+      this.iconPath = new vscode.ThemeIcon(
+        "clock",
+        new vscode.ThemeColor("charts.yellow"),
+      );
+    } else {
+      this.iconPath = new vscode.ThemeIcon(
+        "circle-large-outline",
+        new vscode.ThemeColor("charts.orange"),
+      );
+    }
+    
+    this.description = task.optional ? `${task.id} (Optional)` : task.id;
+    this.tooltip = `[${task.specName}] ${task.id}: ${task.title}${task.optional ? " (Optional)" : ""}`;
     this.command = {
       command: task.completed
         ? "copilot-specs.uncheckTask"

@@ -1,7 +1,7 @@
 {
   "name": "copilot-specs",
   "displayName": "Copilot Specs",
-  "description": "Spec-driven development with GitHub Copilot — requirements, design, and task tracking linked to your code.",
+  "description": "Spec-driven development with GitHub Copilot \u2014 requirements, design, and task tracking linked to your code.",
   "version": "0.1.12",
   "publisher": "moonolgerd",
   "repository": {
@@ -1039,7 +1039,7 @@
     "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./",
     "bundle": "node esbuild.js --production",
-    "dev": "node esbuild.js --watch",
+    "dev": "node init && node esbuild.js --watch",
     "lint": "tsc --noEmit",
     "test": "npm run compile && vscode-test"
   },

@@ -17,7 +17,7 @@ suite("taskManager", () => {
       assert.equal(tasks[0].specName, "mySpec");
     });
 
-    test("parses a completed task", () => {
+    test("parses a completed task with [x]", () => {
       const { tasks } = parseTasks("- [x] Done", "mySpec");
       assert.equal(tasks[0].completed, true);
     });
@@ -25,6 +25,51 @@ suite("taskManager", () => {
     test("parses capital X as completed", () => {
       const { tasks } = parseTasks("- [X] Done", "mySpec");
       assert.equal(tasks[0].completed, true);
+    });
+
+    test("parses [*] as completed", () => {
+      const { tasks } = parseTasks("- [*] Done", "mySpec");
+      assert.equal(tasks[0].completed, true);
+      assert.equal(tasks[0].inProgress, false);
+      assert.equal(tasks[0].queued, false);
+    });
+
+    test("parses [-] as in-progress", () => {
+      const { tasks } = parseTasks("- [-] Working on it", "mySpec");
+      assert.equal(tasks[0].completed, false);
+      assert.equal(tasks[0].inProgress, true);
+      assert.equal(tasks[0].queued, false);
+    });
+
+    test("parses [~] as queued", () => {
+      const { tasks } = parseTasks("- [~] Coming up", "mySpec");
+      assert.equal(tasks[0].completed, false);
+      assert.equal(tasks[0].inProgress, false);
+      assert.equal(tasks[0].queued, true);
+    });
+
+    test("parses [ ]* as optional", () => {
+      const { tasks } = parseTasks("- [ ]* Optional task", "mySpec");
+      assert.equal(tasks[0].completed, false);
+      assert.equal(tasks[0].optional, true);
+    });
+
+    test("parses [-]* as in-progress and optional", () => {
+      const { tasks } = parseTasks("- [-]* Working on it optional", "mySpec");
+      assert.equal(tasks[0].inProgress, true);
+      assert.equal(tasks[0].optional, true);
+    });
+
+    test("parses [~]* as queued and optional", () => {
+      const { tasks } = parseTasks("- [~]* Queued optional", "mySpec");
+      assert.equal(tasks[0].queued, true);
+      assert.equal(tasks[0].optional, true);
+    });
+
+    test("parses [*]* as completed and optional", () => {
+      const { tasks } = parseTasks("- [*]* Optional and done", "mySpec");
+      assert.equal(tasks[0].completed, true);
+      assert.equal(tasks[0].optional, true);
     });
 
     test("extracts task ID from HTML comment", () => {
@@ -39,6 +84,11 @@ suite("taskManager", () => {
     test("extracts task ID from bold prefix", () => {
       const { tasks } = parseTasks("- [ ] **T5**: My task", "mySpec");
       assert.equal(tasks[0].id, "T5");
+    });
+
+    test("extracts task ID from colon prefix", () => {
+      const { tasks } = parseTasks("- [ ] T11: My task", "mySpec");
+      assert.equal(tasks[0].id, "T11");
     });
 
     test("auto-assigns sequential IDs when no explicit ID", () => {

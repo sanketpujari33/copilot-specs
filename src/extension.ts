@@ -761,6 +761,18 @@ export function activate(context: vscode.ExtensionContext): void {
     ],
 
     [
+      "copilot-specs.toggleSubTaskRequired",
+      async (specName: string, lineIndex: number) => {
+        if (!specName || lineIndex === undefined) {
+          return;
+        }
+        const { toggleSubTaskRequired } = await import("./taskManager.js");
+        await toggleSubTaskRequired(specName, lineIndex);
+        refreshAll();
+      },
+    ],
+
+    [
       "copilot-specs.runRequiredTasks",
       async (specNameOrItem?: unknown) => {
         let name =

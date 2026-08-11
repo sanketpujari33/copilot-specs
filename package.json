@@ -37,12 +37,54 @@
   "main": "./dist/extension.js",
   "icon": "media/icon.png",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "copilot-specs.spec",
+        "name": "spec",
+        "fullName": "Copilot Specs",
+        "description": "Create and manage feature specs with requirements, design docs, and task lists.",
+        "isWithImplicitVariables": true,
+        "isSticky": false,
+        "commands": [
+          {
+            "name": "create",
+            "description": "Create a new spec with Copilot-generated content"
+          },
+          {
+            "name": "regenerate",
+            "description": "Regenerate a section (requirements, design, or tasks)"
+          },
+          {
+            "name": "implement",
+            "description": "Get implementation context prompt for a task"
+          }
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "copilot-specs.newSpec",
-        "title": "New Spec",
+        "title": "New Feature Spec",
         "category": "Copilot Specs",
         "icon": "$(add)"
+      },
+      {
+        "command": "copilot-specs.newBugfixSpec",
+        "title": "New Bugfix Spec",
+        "category": "Copilot Specs",
+        "icon": "$(bug)"
+      },
+      {
+        "command": "copilot-specs.newQuickSpec",
+        "title": "New Quick Spec",
+        "category": "Copilot Specs",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "copilot-specs.createSpecWizard",
+        "title": "New Spec Wizard",
+        "category": "Copilot Specs",
+        "icon": "$(wand)"
       },
       {
         "command": "copilot-specs.deleteSpec",
@@ -56,6 +98,36 @@
         "category": "Copilot Specs"
       },
       {
+        "command": "copilot-specs.openSpec",
+        "title": "Open Spec",
+        "category": "Copilot Specs",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "copilot-specs.openSpecFile",
+        "title": "Open Spec File",
+        "category": "Copilot Specs",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "copilot-specs.openSpecRequirements",
+        "title": "Open Spec Requirements",
+        "category": "Copilot Specs",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "copilot-specs.openSpecDesign",
+        "title": "Open Spec Design",
+        "category": "Copilot Specs",
+        "icon": "$(symbol-structure)"
+      },
+      {
+        "command": "copilot-specs.openSpecTasks",
+        "title": "Open Spec Tasks",
+        "category": "Copilot Specs",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "copilot-specs.generateWithCopilot",
         "title": "Generate with Copilot",
         "category": "Copilot Specs",
@@ -66,6 +138,24 @@
         "title": "Verify All Tasks with Copilot",
         "category": "Copilot Specs",
         "icon": "$(run-all)"
+      },
+      {
+        "command": "copilot-specs.runRequiredTasks",
+        "title": "Run Required Tasks with Copilot",
+        "category": "Copilot Specs",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "copilot-specs.toggleTaskRequired",
+        "title": "Toggle Task Required (*)",
+        "category": "Copilot Specs",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "copilot-specs.startImplementation",
+        "title": "Start Implementation",
+        "category": "Copilot Specs",
+        "icon": "$(play)"
       },
       {
         "command": "copilot-specs.startTask",
@@ -144,10 +234,28 @@
         "icon": "$(add)"
       },
       {
+        "command": "copilot-specs.evaluateSteeringFile",
+        "title": "Analyze Chat Customization",
+        "category": "Copilot Specs",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "copilot-specs.evaluateAllSteering",
+        "title": "Evaluate All Chat Customizations",
+        "category": "Copilot Specs",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "copilot-specs.newPrompt",
         "title": "New Prompt",
         "category": "Copilot Specs",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "copilot-specs.newWorkflow",
+        "title": "New Workflow",
+        "category": "Copilot Specs",
+        "icon": "$(play-circle)"
       },
       {
         "command": "copilot-specs.editSteering",
@@ -192,6 +300,12 @@
         "icon": "$(rocket)"
       },
       {
+        "command": "copilot-specs.selectModel",
+        "title": "Select Language Model",
+        "category": "Copilot Specs",
+        "icon": "$(symbol-misc)"
+      },
+      {
         "command": "copilot-specs.refreshExplorer",
         "title": "Refresh",
         "category": "Copilot Specs",
@@ -232,6 +346,166 @@
         "title": "Disable MCP Server",
         "category": "Copilot Specs",
         "icon": "$(circle-slash)"
+      },
+      {
+        "command": "copilot-specs.todo.refresh",
+        "title": "Refresh Todos",
+        "category": "Developer Todos",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "copilot-specs.todo.showFilterMenu",
+        "title": "Filter Todos",
+        "category": "Developer Todos",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "copilot-specs.todo.filterAll",
+        "title": "Show All Todos",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "copilot-specs.todo.filterRemaining",
+        "title": "Show Remaining Only",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "copilot-specs.todo.filterCompleted",
+        "title": "Show Completed Only",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "copilot-specs.todo.filterIgnored",
+        "title": "Show Ignored Only",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "copilot-specs.todo.completeTodo",
+        "title": "Complete Todo",
+        "category": "Developer Todos",
+        "icon": "$(check)"
+      },
+      {
+        "command": "copilot-specs.todo.reopenTodo",
+        "title": "Reopen Todo",
+        "category": "Developer Todos",
+        "icon": "$(circle-outline)"
+      },
+      {
+        "command": "copilot-specs.todo.ignoreTodo",
+        "title": "Ignore/Skip Todo",
+        "category": "Developer Todos",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "copilot-specs.todo.unignoreTodo",
+        "title": "Unignore Todo",
+        "category": "Developer Todos",
+        "icon": "$(circle-outline)"
+      },
+      {
+        "command": "copilot-specs.todo.navigateToFile",
+        "title": "Navigate to File",
+        "category": "Developer Todos",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "copilot-specs.todo.openFile",
+        "title": "Open File",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "copilot-specs.todo.showTemplate",
+        "title": "Show Template Details",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "copilot-specs.todo.clearBranchTodos",
+        "title": "Clear All Todos for Current Branch",
+        "category": "Developer Todos",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "copilot-specs.todo.addTodo",
+        "title": "Add New Todo",
+        "category": "Developer Todos",
+        "icon": "$(add)"
+      },
+      {
+        "command": "copilot-specs.todo.selectPreset",
+        "title": "Select Template Preset",
+        "category": "Developer Todos",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "developerTodos.refresh",
+        "title": "Refresh Todos",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.showFilterMenu",
+        "title": "Filter Todos",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.filterAll",
+        "title": "Show All Todos",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.filterRemaining",
+        "title": "Show Remaining Only",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.filterCompleted",
+        "title": "Show Completed Only",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.filterIgnored",
+        "title": "Show Ignored Only",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.completeTodo",
+        "title": "Complete Todo",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.reopenTodo",
+        "title": "Reopen Todo",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.ignoreTodo",
+        "title": "Ignore/Skip Todo",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.unignoreTodo",
+        "title": "Unignore Todo",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.navigateToFile",
+        "title": "Navigate to File",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.openFile",
+        "title": "Open File",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.showTemplate",
+        "title": "Show Template Details",
+        "category": "Developer Todos"
+      },
+      {
+        "command": "developerTodos.clearBranchTodos",
+        "title": "Clear All Todos for Current Branch",
+        "category": "Developer Todos"
       }
     ],
     "viewsContainers": {
@@ -272,6 +546,11 @@
           "name": "MCP Servers",
           "contextualTitle": "Workspace & User MCP Servers",
           "visibility": "visible"
+        },
+        {
+          "id": "copilot-specs.developerTodosView",
+          "name": "Developer Todos",
+          "contextualTitle": "Branch-aware Developer Todos"
         }
       ],
       "copilot-specs-mcp-container": [
@@ -286,14 +565,29 @@
     "menus": {
       "view/title": [
         {
+          "command": "copilot-specs.createSpecWizard",
+          "when": "view == copilot-specs.specExplorer",
+          "group": "navigation@1"
+        },
+        {
           "command": "copilot-specs.newSpec",
           "when": "view == copilot-specs.specExplorer",
-          "group": "navigation"
+          "group": "navigation@2"
+        },
+        {
+          "command": "copilot-specs.newBugfixSpec",
+          "when": "view == copilot-specs.specExplorer",
+          "group": "navigation@3"
+        },
+        {
+          "command": "copilot-specs.newQuickSpec",
+          "when": "view == copilot-specs.specExplorer",
+          "group": "navigation@4"
         },
         {
           "command": "copilot-specs.refreshExplorer",
           "when": "view == copilot-specs.specExplorer",
-          "group": "navigation"
+          "group": "navigation@5"
         },
         {
           "command": "copilot-specs.linkExistingTaskToImplementation",
@@ -329,43 +623,109 @@
           "command": "copilot-specs.openMcpConfig",
           "when": "view == copilot-specs.mcpServersExplorer",
           "group": "navigation"
+        },
+        {
+          "command": "copilot-specs.todo.showFilterMenu",
+          "when": "view == copilot-specs.developerTodosView",
+          "group": "navigation"
+        },
+        {
+          "command": "copilot-specs.todo.refresh",
+          "when": "view == copilot-specs.developerTodosView",
+          "group": "navigation"
+        },
+        {
+          "command": "copilot-specs.todo.clearBranchTodos",
+          "when": "view == copilot-specs.developerTodosView",
+          "group": "navigation"
+        },
+        {
+          "command": "copilot-specs.todo.addTodo",
+          "when": "view == copilot-specs.developerTodosView",
+          "group": "navigation"
+        },
+        {
+          "command": "copilot-specs.todo.selectPreset",
+          "when": "view == copilot-specs.developerTodosView",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "copilot-specs.evaluateSteeringFile",
+          "when": "resourceExtname =~ /\\.(prompt\\.md|instructions\\.md|agent\\.md)$/ || resourceBasename == 'SKILL.md' || resourceBasename == 'copilot-instructions.md' || resourceBasename == 'AGENTS.md' || resourceBasename == 'AGENT.md'",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
         {
+          "command": "copilot-specs.todo.navigateToFile",
+          "when": "view == copilot-specs.developerTodosView && (viewItem == todoItem || viewItem == todoItemCompleted || viewItem == todoItemIgnored)",
+          "group": "inline@1"
+        },
+        {
+          "command": "copilot-specs.todo.completeTodo",
+          "when": "view == copilot-specs.developerTodosView && (viewItem == todoItem || viewItem == todoItemBranchLevel)",
+          "group": "inline@2"
+        },
+        {
+          "command": "copilot-specs.todo.ignoreTodo",
+          "when": "view == copilot-specs.developerTodosView && (viewItem == todoItem || viewItem == todoItemBranchLevel)",
+          "group": "inline@3"
+        },
+        {
+          "command": "copilot-specs.todo.reopenTodo",
+          "when": "view == copilot-specs.developerTodosView && (viewItem == todoItemCompleted || viewItem == todoItemCompletedBranchLevel)",
+          "group": "inline@2"
+        },
+        {
+          "command": "copilot-specs.todo.unignoreTodo",
+          "when": "view == copilot-specs.developerTodosView && (viewItem == todoItemIgnored || viewItem == todoItemIgnoredBranchLevel)",
+          "group": "inline@2"
+        },
+        {
+          "command": "copilot-specs.todo.showTemplate",
+          "when": "view == copilot-specs.developerTodosView && (viewItem == todoItem || viewItem == todoItemCompleted || viewItem == todoItemIgnored || viewItem == todoItemBranchLevel || viewItem == todoItemCompletedBranchLevel || viewItem == todoItemIgnoredBranchLevel)"
+        },
+        {
           "command": "copilot-specs.runAllTasks",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "inline"
         },
         {
           "command": "copilot-specs.generateWithCopilot",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "inline@1"
         },
         {
           "command": "copilot-specs.runAllTasks",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "1_actions@1"
         },
         {
           "command": "copilot-specs.generateWithCopilot",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "1_actions@2"
         },
         {
           "command": "copilot-specs.renameSpec",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "2_manage@1"
         },
         {
           "command": "copilot-specs.deleteSpec",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "2_manage@2"
         },
         {
           "command": "copilot-specs.linkExistingTaskToImplementation",
-          "when": "viewItem == spec",
+          "when": "viewItem == spec || viewItem == spec-feature || viewItem == spec-bugfix || viewItem == spec-quick",
           "group": "1_actions@3"
+        },
+        {
+          "command": "copilot-specs.openSpecFile",
+          "when": "viewItem == specFile-requirements || viewItem == specFile-design || viewItem == specFile-tasks",
+          "group": "inline@1"
         },
         {
           "command": "copilot-specs.checkTask",
@@ -408,19 +768,236 @@
           "group": "inline@1"
         },
         {
+          "command": "copilot-specs.editSteering",
+          "when": "view == copilot-specs.steeringExplorer && viewItem == section-instructions",
+          "group": "inline"
+        },
+        {
+          "command": "copilot-specs.newSteering",
+          "when": "view == copilot-specs.steeringExplorer && viewItem == section-rules",
+          "group": "inline"
+        },
+        {
+          "command": "copilot-specs.newSteering",
+          "when": "view == copilot-specs.steeringExplorer && viewItem == section-skills",
+          "group": "inline"
+        },
+        {
           "command": "copilot-specs.newPrompt",
           "when": "view == copilot-specs.steeringExplorer && viewItem == section-prompts",
+          "group": "inline"
+        },
+        {
+          "command": "copilot-specs.newWorkflow",
+          "when": "view == copilot-specs.steeringExplorer && viewItem == section-workflows",
           "group": "inline"
         }
       ]
     },
-    "chatParticipants": [
+    "languageModelTools": [
       {
-        "id": "copilot-specs.spec",
-        "name": "spec",
-        "fullName": "Copilot Specs",
-        "description": "Create and manage feature specs. Try: @spec create auth feature for src/auth/**",
-        "isSticky": false
+        "name": "developerTodos_getRemainingTasks",
+        "displayName": "Get Remaining Tasks",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "devTodos",
+        "icon": "$(checklist)",
+        "userDescription": "Get the list of remaining developer tasks for the current git branch",
+        "modelDescription": "Gets all remaining (incomplete and not ignored) developer todos/tasks for the current git branch. Returns a list of tasks with their ID, name, description, priority, associated file path, and AI instructions if available. Use this to understand what tasks need to be completed before a feature is ready.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "priority": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low",
+                "all"
+              ],
+              "description": "Filter tasks by priority level. Use 'all' to get all priorities."
+            }
+          }
+        }
+      },
+      {
+        "name": "developerTodos_completeTodo",
+        "displayName": "Complete Task",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "completeTodo",
+        "icon": "$(check)",
+        "userDescription": "Mark a developer task as completed",
+        "modelDescription": "Marks a specific developer todo/task as completed. Use this after you have finished implementing or addressing the task. The task will be marked as done and moved to the completed section. Requires the exact task ID which can be obtained from getRemainingTasks.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "todoId": {
+              "type": "string",
+              "description": "The unique ID of the todo to complete. Get this from the getRemainingTasks tool."
+            }
+          },
+          "required": [
+            "todoId"
+          ]
+        }
+      },
+      {
+        "name": "developerTodos_getTaskInstructions",
+        "displayName": "Get Task Instructions",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "taskInstructions",
+        "icon": "$(info)",
+        "userDescription": "Get detailed AI instructions for completing a specific task",
+        "modelDescription": "Gets the detailed AI instructions for a specific developer todo/task. Templates can include aiInstruction fields that provide step-by-step guidance on how to complete the task. Use this to understand exactly what needs to be done to complete a task. Returns the task details along with any AI-specific instructions defined in the template.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "todoId": {
+              "type": "string",
+              "description": "The unique ID of the todo to get instructions for. Get this from the getRemainingTasks tool."
+            }
+          },
+          "required": [
+            "todoId"
+          ]
+        }
+      },
+      {
+        "name": "developerTodos_addTodo",
+        "displayName": "Add Todo",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "addTodo",
+        "icon": "$(add)",
+        "userDescription": "Create a new todo task for the current git branch",
+        "modelDescription": "Creates a new ad-hoc developer todo/task on the current git branch. Use this when the user or the task at hand requires tracking a new piece of work that is not already covered by an existing template-matched todo. For example: 'add a todo to write unit tests for the auth module', 'create a task to update the README', or 'remember to fix the flaky test'. Returns the newly created todo's ID which can be used with completeTodo or getTaskInstructions.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Short display name for the todo (e.g. 'Write unit tests for AuthService'). Keep it concise."
+            },
+            "description": {
+              "type": "string",
+              "description": "Detailed description of what needs to be done. Be specific about the expected outcome."
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ],
+              "description": "Priority level. Use 'high' for blocking or critical tasks, 'medium' for important but non-blocking, 'low' for nice-to-have. Defaults to 'medium'."
+            },
+            "filePath": {
+              "type": "string",
+              "description": "Optional absolute file path to associate the todo with a specific file. Omit for branch-level tasks that are not tied to a file."
+            }
+          },
+          "required": [
+            "name",
+            "description"
+          ]
+        }
+      },
+      {
+        "name": "developerTodos_completeAllBranchTasks",
+        "displayName": "Complete All Branch Tasks",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "completeAllTasks",
+        "icon": "$(check-all)",
+        "userDescription": "Mark all remaining tasks on the current git branch as completed",
+        "modelDescription": "Marks all active (incomplete and non-ignored) tasks on the current git branch as completed at once. Use this when the user asks to mark all tasks done or when all feature requirements for the branch are finished.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "copilotSpecs_listSpecs",
+        "displayName": "List Feature Specs",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "listSpecs",
+        "icon": "$(tasklist)",
+        "userDescription": "List all feature specifications in the workspace",
+        "modelDescription": "Gets a list of all feature specs in the workspace, including spec names, file globs, and task progress stats. Use this to discover active feature specifications.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "copilotSpecs_getSpecDetails",
+        "displayName": "Get Feature Spec Details",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "specDetails",
+        "icon": "$(document)",
+        "userDescription": "Get requirements, design, and tasks for a feature spec",
+        "modelDescription": "Gets full requirements, architecture design, and implementation tasks for a specific feature spec by name. Use this to inspect feature specifications.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "specName": {
+              "type": "string",
+              "description": "Name of the feature spec"
+            }
+          },
+          "required": [
+            "specName"
+          ]
+        }
+      },
+      {
+        "name": "copilotSpecs_getTaskContext",
+        "displayName": "Get Task Implementation Context",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "taskContext",
+        "icon": "$(play)",
+        "userDescription": "Get complete task context (requirements, design, linked files) for implementing a spec task",
+        "modelDescription": "Gets rich context for a spec task, including task metadata, linked EARS requirement text, design document excerpts, and linked source code files. Use this before implementing any task.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "specName": {
+              "type": "string",
+              "description": "Name of the feature spec"
+            },
+            "taskId": {
+              "type": "string",
+              "description": "ID of the task (e.g. T1, T2)"
+            }
+          },
+          "required": [
+            "specName",
+            "taskId"
+          ]
+        }
+      },
+      {
+        "name": "copilotSpecs_markTaskComplete",
+        "displayName": "Mark Spec Task Complete",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "completeSpecTask",
+        "icon": "$(check)",
+        "userDescription": "Mark a feature spec task and its subtasks as complete",
+        "modelDescription": "Marks a spec task and all its subtasks as completed. Use this after successfully implementing a task.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "specName": {
+              "type": "string",
+              "description": "Name of the feature spec"
+            },
+            "taskId": {
+              "type": "string",
+              "description": "ID of the task (e.g. T1, T2)"
+            }
+          },
+          "required": [
+            "specName",
+            "taskId"
+          ]
+        }
       }
     ],
     "configuration": {
@@ -444,6 +1021,16 @@
           ],
           "default": "feature",
           "description": "Default spec template to use when creating a new spec."
+        },
+        "copilot-specs.preferredModelFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred model family for Copilot Specs (e.g., local, lemonade, gpt-4o, claude-3.5-sonnet)."
+        },
+        "copilot-specs.preferredModelVendor": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred model vendor for Copilot Specs (e.g., lemonade, ollama, copilot)."
         }
       }
     }
@@ -453,7 +1040,7 @@
     "compile": "tsc -p ./",
     "bundle": "node esbuild.js --production",
     "dev": "node esbuild.js --watch",
-    "lint": "eslint src",
+    "lint": "tsc --noEmit",
     "test": "npm run compile && vscode-test"
   },
   "devDependencies": {

@@ -20,27 +20,39 @@ interface ParsedCommand {
   taskId?: string;
 }
 
-function parseCommand(prompt: string): ParsedCommand {
-  // @spec create <name> for <glob>
-  const createMatch = prompt.match(
-    /^create\s+["']?([^"']+?)["']?\s+(?:for\s+)?([^\s]+)\s*$/i,
+function parseCommand(prompt: string, command?: string): ParsedCommand {
+  let text = prompt.trim();
+  if (command) {
+    text = `/${command} ${text}`.trim();
+  }
+
+  // Strip leading slash if typed (e.g. /create -> create)
+  text = text.replace(/^\//, "");
+
+  // 1. Explicit 'for': @spec create <name> for <glob>
+  const createForMatch = text.match(
+    /^create\s+["']?(.+?)["']?\s+for\s+([^\s]+)\s*$/i,
   );
-  if (createMatch) {
+  if (createForMatch) {
+    let specName = createForMatch[1].trim();
+    specName = specName.replace(/^(a|an)\s+/i, "");
     return {
       action: "create",
-      specName: createMatch[1].trim(),
-      fileGlob: createMatch[2].trim(),
+      specName,
+      fileGlob: createForMatch[2].trim(),
     };
   }
 
-  // @spec create <name>
-  const createSimple = prompt.match(/^create\s+["']?([^"']+?)["']?\s*$/i);
+  // 2. Simple create: @spec create <name>
+  const createSimple = text.match(/^create\s+["']?(.+?)["']?\s*$/i);
   if (createSimple) {
-    return { action: "create", specName: createSimple[1].trim() };
+    let specName = createSimple[1].trim();
+    specName = specName.replace(/^(a|an)\s+/i, "");
+    return { action: "create", specName };
   }
 
   // @spec regenerate <spec> requirements|design|tasks
-  const regenMatch = prompt.match(
+  const regenMatch = text.match(
     /^regenerate\s+(\S+)\s+(requirements|design|tasks)\s*$/i,
   );
   if (regenMatch) {
@@ -55,7 +67,7 @@ function parseCommand(prompt: string): ParsedCommand {
   }
 
   // @spec implement <spec> <taskId>
-  const implementMatch = prompt.match(/^implement\s+(\S+)\s+(\S+)\s*$/i);
+  const implementMatch = text.match(/^implement\s+(\S+)\s+(\S+)\s*$/i);
   if (implementMatch) {
     return {
       action: "implement",
@@ -75,17 +87,18 @@ export function registerChatParticipant(
   const participant = vscode.chat.createChatParticipant(
     "copilot-specs.spec",
     async (request, _chatContext, stream, _token) => {
-      const parsed = parseCommand(request.prompt);
+      const parsed = parseCommand(request.prompt, request.command);
 
       if (parsed.action === "help") {
         stream.markdown(
           `## Copilot Specs\n\n` +
             `I help you create and manage feature specs with requirements, design docs, and task lists.\n\n` +
-            `**Commands:**\n\n` +
-            `- \`@spec create <name> for <glob>\` — Create a new spec with Copilot-generated content\n` +
-            `  *Example: \`@spec create auth for src/auth/**\`*\n\n` +
-            `- \`@spec create <name>\` — Create a spec (you'll be prompted for the file glob)\n\n` +
-            `- \`@spec regenerate <spec-name> requirements|design|tasks\` — Regenerate a section\n`,
+            `**Slash Commands:**\n\n` +
+            `- \`@spec /create <name> for <glob>\` — Create a new spec with AI-generated content\n` +
+            `  *Example: \`@spec /create auth for src/auth/**\`*\n\n` +
+            `- \`@spec /create <name>\` — Create a spec (auto-assigns default file glob)\n\n` +
+            `- \`@spec /regenerate <spec-name> requirements|design|tasks\` — Regenerate a specific section\n\n` +
+            `- \`@spec /implement <spec-name> <task-id>\` — Get task implementation prompt\n`,
         );
         return;
       }
@@ -118,7 +131,12 @@ export function registerChatParticipant(
           );
         }
 
-        await generateFullSpec(parsed.specName!, fileGlob, stream);
+        await generateFullSpec(
+          parsed.specName!,
+          fileGlob,
+          stream,
+          request.model,
+        );
         return;
       }
 
@@ -156,6 +174,7 @@ export function registerChatParticipant(
           existingContext,
           parsed.section,
           stream,
+          request.model,
         );
 
         if (newContent) {

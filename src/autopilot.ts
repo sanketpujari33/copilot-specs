@@ -12,36 +12,41 @@ import {
 } from "./utils/fileSystem.js";
 import { stripFrontmatter } from "./utils/frontmatter.js";
 import { readSteeringForContext } from "./steeringManager.js";
+import { selectBestChatModel } from "./copilot/specGenerator.js";
 
-export async function runAutopilot(): Promise<void> {
-  const specs = await listSpecs();
-  if (specs.length === 0) {
-    vscode.window.showInformationMessage(
-      'No specs found. Create a spec first with "Copilot Specs: New Spec".',
+export async function runAutopilot(specName?: string): Promise<void> {
+  let selectedSpecName = specName;
+  if (!selectedSpecName) {
+    const specs = await listSpecs();
+    if (specs.length === 0) {
+      vscode.window.showInformationMessage(
+        'No specs found. Create a spec first with "Copilot Specs: New Spec".',
+      );
+      return;
+    }
+
+    const specPick = await vscode.window.showQuickPick(
+      specs.map((s) => ({ label: s.name, description: s.fileGlob })),
+      { placeHolder: "Select a spec to execute with Autopilot" },
     );
-    return;
+    if (!specPick) {
+      return;
+    }
+    selectedSpecName = specPick.label;
   }
 
-  const specPick = await vscode.window.showQuickPick(
-    specs.map((s) => ({ label: s.name, description: s.fileGlob })),
-    { placeHolder: "Select a spec to execute with Autopilot" },
-  );
-  if (!specPick) {
-    return;
-  }
-
-  const { tasks } = await loadTasks(specPick.label);
+  const { tasks } = await loadTasks(selectedSpecName);
   const pending = tasks.filter((t) => !t.completed);
 
   if (pending.length === 0) {
     vscode.window.showInformationMessage(
-      `All tasks in "${specPick.label}" are already complete! 🎉`,
+      `All tasks in "${selectedSpecName}" are already complete! 🎉`,
     );
     return;
   }
 
   const confirmed = await vscode.window.showWarningMessage(
-    `Autopilot will attempt to implement ${pending.length} task(s) in spec "${specPick.label}" using Copilot. Continue?`,
+    `Autopilot will attempt to implement ${pending.length} task(s) in spec "${selectedSpecName}" using Copilot. Continue?`,
     { modal: true },
     "Run Autopilot",
   );
@@ -52,7 +57,7 @@ export async function runAutopilot(): Promise<void> {
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: `Autopilot: ${specPick.label}`,
+      title: `Autopilot: ${selectedSpecName}`,
       cancellable: true,
     },
     async (progress, cancelToken) => {
@@ -68,7 +73,7 @@ export async function runAutopilot(): Promise<void> {
           message: `[${i + 1}/${pending.length}] ${task.title}`,
         });
 
-        await executeTask(specPick.label, task, cancelToken);
+        await executeTask(selectedSpecName, task, cancelToken);
 
         if (cancelToken.isCancellationRequested) {
           break;
@@ -93,11 +98,10 @@ async function executeTask(
   const context = await buildTaskContext(specName, task);
 
   // Select model
-  const models = await vscode.lm.selectChatModels({ family: "gpt-4o" });
-  const model = models[0];
+  const model = await selectBestChatModel();
   if (!model) {
     vscode.window.showWarningMessage(
-      "No Copilot model available. Skipping autopilot.",
+      "No language model available for Autopilot.",
     );
     return;
   }

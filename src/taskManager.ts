@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import { Task, SubTask, TaskProgress } from "./models/index.js";
 import {
   readTextFile,
@@ -9,11 +10,13 @@ import {
   listDirectories,
 } from "./utils/fileSystem.js";
 
-// Regex patterns for task parsing — match any markdown checkbox line
-const TASK_LINE = /^(\s*)-\s+\[(x|X| )\]\s+(.+)$/;
-const SUBTASK_LINE = /^(\s{2,})-\s+\[(x|X| )\]\s+(.+)$/;
+// Regex patterns for task parsing — match any markdown checkbox line (including [x]*)
+const TASK_LINE = /^(\s*)-\s+\[(x\*?|X\*?| )\]\s+(.+)$/;
+const SUBTASK_LINE = /^(\s{2,})-\s+\[(x\*?|X\*?| )\]\s+(.+)$/;
+const NUMBERED_SUBTASK_LINE = /^(\s*)-\s+\[(x\*?|X\*?| )\]\s+(\d+\.\d+)\s+(.+)$/;
 // Heading-style tasks: ### T1: Title, ### - [ ] T1: Title, or ### - [x] T1: Title
-const HEADING_TASK_LINE = /^###\s+(?:-\s+\[(x|X| )\]\s+)?(.+)$/;
+const HEADING_TASK_LINE = /^###\s+(?:-\s+\[(x\*?|X\*?| )\]\s+)?(.+)$/;
+const PHASE_HEADER = /^###\s+(Phase\s+[^\n<!--]+)/i;
 const FILES_COMMENT = /<!--\s*files:\s*(.+?)\s*-->/;
 const TASK_ID_COMMENT = /<!--\s*task:\s*(\S+)\s*-->/;
 const REQUIRES_COMMENT = /<!--\s*requires?:\s*(.+?)\s*-->/;
@@ -43,9 +46,8 @@ export function parseTasks(
   const lines = content.split("\n");
   const tasks: Task[] = [];
   let currentTask: Task | undefined;
-  // Tracks the most-recently-parsed heading task so that root-level - [ ] lines
-  // beneath it are collected as its subtasks rather than new top-level tasks.
   let currentHeadingTask: Task | undefined;
+  let currentPhase: string | undefined;
   let taskCounter = 0;
   let fileGlob: string | undefined;
   let inFrontmatter = false;
@@ -77,11 +79,33 @@ export function parseTasks(
       continue;
     }
 
+    // Check phase header (e.g., ### Phase 1: Foundation)
+    const phaseMatch = line.match(PHASE_HEADER);
+    if (phaseMatch) {
+      currentPhase = phaseMatch[1].trim().replace(/\s*<!--.*-->/, "").trim();
+    }
+
+    // Numbered subtask pattern (- [ ] 1.1 title or - [ ] 2.3 title)
+    const numSubMatch = line.match(NUMBERED_SUBTASK_LINE);
+    if (numSubMatch && currentTask && !line.trim().startsWith("###")) {
+      const checkVal = numSubMatch[2].toLowerCase();
+      const sub: SubTask = {
+        title: `${numSubMatch[3]} ${numSubMatch[4].trim()}`,
+        completed: checkVal.startsWith("x"),
+        autoVerified: checkVal.includes("*"),
+        lineIndex: i,
+      };
+      currentTask.subTasks.push(sub);
+      continue;
+    }
+
     const subtaskMatch = line.match(SUBTASK_LINE);
     if (subtaskMatch && currentTask) {
+      const checkVal = subtaskMatch[2].toLowerCase();
       const sub: SubTask = {
         title: subtaskMatch[3].trim(),
-        completed: subtaskMatch[2].toLowerCase() === "x",
+        completed: checkVal.startsWith("x"),
+        autoVerified: checkVal.includes("*"),
         lineIndex: i,
       };
       currentTask.subTasks.push(sub);
@@ -90,9 +114,8 @@ export function parseTasks(
 
     // Heading-style parent task: ### T1: Title  /or/  ### - [ ] T1: Title
     const headingTaskMatch = line.match(HEADING_TASK_LINE);
-    if (headingTaskMatch) {
+    if (headingTaskMatch && !line.match(/^###\s+Phase/i)) {
       taskCounter++;
-      // Group 1 = optional checkbox state ('x'/'X'/' '), Group 2 = title text
       const explicitCheckbox = headingTaskMatch[1];
       let titlePart = headingTaskMatch[2].trim();
 
@@ -107,7 +130,6 @@ export function parseTasks(
         id = boldId[1];
         titlePart = titlePart.replace(BOLD_ID, "").trim();
       }
-      // Plain `T1: Title` or `T-1: Title` or `REQ-01: Title` style
       if (!id) {
         const colonId = titlePart.match(/^(\S+?):\s+/);
         if (colonId) {
@@ -136,17 +158,17 @@ export function parseTasks(
         }
       }
 
+      const explicitCheckVal = explicitCheckbox?.toLowerCase() ?? "";
       currentTask = {
         id,
         title: titlePart,
-        // Use explicit checkbox value when present; otherwise derive later from subtasks.
-        completed: explicitCheckbox
-          ? explicitCheckbox.toLowerCase() === "x"
-          : false,
+        completed: explicitCheckVal.startsWith("x"),
+        autoVerified: explicitCheckVal.includes("*"),
         specName,
         lineIndex: i,
         subTasks: [],
         requirementIds,
+        phase: currentPhase,
       };
       tasks.push(currentTask);
       currentHeadingTask = currentTask;
@@ -155,11 +177,12 @@ export function parseTasks(
 
     const taskMatch = line.match(TASK_LINE);
     if (taskMatch) {
-      // If we are inside a heading task, treat this as its subtask regardless of indent.
       if (currentHeadingTask) {
+        const checkVal = taskMatch[2].toLowerCase();
         const sub: SubTask = {
           title: taskMatch[3].trim(),
-          completed: taskMatch[2].toLowerCase() === "x",
+          completed: checkVal.startsWith("x"),
+          autoVerified: checkVal.includes("*"),
           lineIndex: i,
         };
         currentHeadingTask.subTasks.push(sub);
@@ -169,7 +192,6 @@ export function parseTasks(
       taskCounter++;
       let titlePart = taskMatch[3].trim();
 
-      // Extract task ID from <!-- task:ID --> comment or **ID**: bold prefix
       let id: string | undefined;
       const commentId = titlePart.match(TASK_ID_COMMENT);
       if (commentId) {
@@ -185,7 +207,6 @@ export function parseTasks(
         id = `T${taskCounter}`;
       }
 
-      // Extract requirement IDs from <!-- requires:R1,R2 --> comment
       let requirementIds: string[] | undefined;
       const requiresMatch = titlePart.match(REQUIRES_COMMENT);
       if (requiresMatch) {
@@ -204,14 +225,17 @@ export function parseTasks(
         }
       }
 
+      const checkVal = taskMatch[2].toLowerCase();
       currentTask = {
         id,
         title: titlePart,
-        completed: taskMatch[2].toLowerCase() === "x",
+        completed: checkVal.startsWith("x"),
+        autoVerified: checkVal.includes("*"),
         specName,
         lineIndex: i,
         subTasks: [],
         requirementIds,
+        phase: currentPhase,
       };
       tasks.push(currentTask);
     } else if (
@@ -227,9 +251,8 @@ export function parseTasks(
     }
   }
 
-  // For heading-style tasks (### ...) without an explicit checkbox, derive
-  // completed state from whether all subtasks are done.
-  const HEADING_EXPLICIT_CHECKBOX = /^###\s+-\s+\[(x|X| )\]/;
+  // For heading-style tasks without explicit checkbox, derive completed state from subtasks
+  const HEADING_EXPLICIT_CHECKBOX = /^###\s+-\s+\[(x\*?|X\*?| )\]/;
   for (const task of tasks) {
     const taskLine = lines[task.lineIndex]?.trimStart() ?? "";
     if (
@@ -247,7 +270,26 @@ export function parseTasks(
 export function calculateProgress(tasks: Task[]): TaskProgress {
   const total = tasks.length;
   const completed = tasks.filter((t) => t.completed).length;
-  return { total, completed };
+
+  const phaseMap = new Map<string, { total: number; completed: number }>();
+  for (const task of tasks) {
+    if (task.phase) {
+      const p = phaseMap.get(task.phase) ?? { total: 0, completed: 0 };
+      p.total++;
+      if (task.completed) {
+        p.completed++;
+      }
+      phaseMap.set(task.phase, p);
+    }
+  }
+
+  const phases = Array.from(phaseMap.entries()).map(([name, stat]) => ({
+    name,
+    total: stat.total,
+    completed: stat.completed,
+  }));
+
+  return { total, completed, phases: phases.length > 0 ? phases : undefined };
 }
 
 export async function loadTasks(specName: string): Promise<TasksParseResult> {
@@ -371,6 +413,45 @@ export function applyCompletedIds(
  * state from the *existing* tasks file on disk so that already-completed
  * tasks are not reset.  Matching is done by task ID (T1, T2, …).
  */
+export async function toggleTaskRequired(
+  specName: string,
+  taskId: string,
+): Promise<void> {
+  const { loadSpec } = await import("./specManager.js");
+  const spec = await loadSpec(specName);
+  if (!spec) {
+    return;
+  }
+
+  const uri = vscode.Uri.file(spec.tasksPath);
+  if (!(await fileExists(uri))) {
+    return;
+  }
+
+  const content = await readTextFile(uri);
+  const lines = content.split("\n");
+  const { tasks } = parseTasks(content, specName);
+  const task = tasks.find((t) => t.id === taskId);
+  if (!task || task.lineIndex < 0 || task.lineIndex >= lines.length) {
+    return;
+  }
+
+  const line = lines[task.lineIndex];
+  let newLine = line;
+  if (line.includes("- [ ]*")) {
+    newLine = line.replace("- [ ]*", "- [ ]");
+  } else if (line.includes("- [ ]")) {
+    newLine = line.replace("- [ ]", "- [ ]*");
+  } else if (line.includes("- [x]*")) {
+    newLine = line.replace("- [x]*", "- [x]");
+  } else if (line.includes("- [x]")) {
+    newLine = line.replace("- [x]", "- [x]*");
+  }
+
+  lines[task.lineIndex] = newLine;
+  await writeTextFile(uri, lines.join("\n"));
+}
+
 export async function preserveCompletedTaskStates(
   specName: string,
   newContent: string,

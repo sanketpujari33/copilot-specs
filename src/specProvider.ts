@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { Spec, Task } from "./models/index.js";
+import { Spec, Task, TaskProgress } from "./models/index.js";
 import { listSpecs } from "./specManager.js";
 import { loadTasks, calculateProgress } from "./taskManager.js";
 
@@ -8,51 +8,100 @@ import { loadTasks, calculateProgress } from "./taskManager.js";
 export class SpecItem extends vscode.TreeItem {
   constructor(
     public readonly spec: Spec,
-    public readonly progress: { total: number; completed: number },
+    public readonly progress: TaskProgress,
   ) {
     super(spec.name, vscode.TreeItemCollapsibleState.Collapsed);
-    this.contextValue = "spec";
-    this.iconPath =
-      progress.total === 0
-        ? new vscode.ThemeIcon(
-            "file-text",
-            new vscode.ThemeColor("descriptionForeground"),
-          )
-        : progress.completed === progress.total
-          ? new vscode.ThemeIcon(
-              "pass-filled",
-              new vscode.ThemeColor("charts.green"),
-            )
-          : new vscode.ThemeIcon(
-              "circle-large-outline",
-              new vscode.ThemeColor("charts.orange"),
-            );
+    this.contextValue = `spec-${spec.specType}`;
+
+    // Icon: prefer progress-based, but fall back to spec-type icons when no tasks
+    if (progress.total === 0) {
+      const emptyIcons: Record<string, string> = {
+        feature: "file-text",
+        bugfix: "bug",
+        quick: "zap",
+      };
+      this.iconPath = new vscode.ThemeIcon(
+        emptyIcons[spec.specType] ?? "file-text",
+        new vscode.ThemeColor("descriptionForeground"),
+      );
+    } else if (progress.completed === progress.total) {
+      this.iconPath = new vscode.ThemeIcon(
+        "pass-filled",
+        new vscode.ThemeColor("charts.green"),
+      );
+    } else {
+      this.iconPath = new vscode.ThemeIcon(
+        "circle-large-outline",
+        new vscode.ThemeColor("charts.orange"),
+      );
+    }
+
     const pct =
       progress.total > 0
         ? Math.round((progress.completed / progress.total) * 100)
         : 0;
-    this.description = progress.total > 0 ? `${pct}%` : "";
+
+    // Type badge in description: [feature] 72%  |  [bugfix]  |  [quick] 100%
+    const typeBadge: Record<string, string> = {
+      feature: "feature",
+      bugfix: "bugfix",
+      quick: "quick",
+    };
+    const badge = typeBadge[spec.specType] ?? spec.specType;
+    this.description =
+      progress.total > 0 ? `[${badge}] ${pct}%` : `[${badge}]`;
+
+    const workflowLabel: Record<string, string> = {
+      "requirements-first": "Requirements-First",
+      "tech-design-first": "Design-First",
+      quick: "Quick",
+    };
+    const phaseBreakdown =
+      progress.phases && progress.phases.length > 0
+        ? `\n\n📌 **Phases**:\n` +
+          progress.phases
+            .map((p) => `- ${p.name}: **${p.completed}/${p.total}**`)
+            .join("\n")
+        : "";
+
     this.tooltip = new vscode.MarkdownString(
-      `**${spec.name}**\n\nGlob: \`${spec.fileGlob}\`\n\n${progress.completed}/${progress.total} tasks complete`,
+      `**${spec.name}**\n\n` +
+      `📁 \`.github/specs/${spec.name}/\`\n\n` +
+      `🏷️ Type: **${badge}** · Workflow: **${workflowLabel[spec.workflowType] ?? spec.workflowType}**\n\n` +
+      `🔗 Glob: \`${spec.fileGlob}\`\n\n` +
+      `✅ ${progress.completed}/${progress.total} tasks complete${phaseBreakdown}`,
     );
+    this.command = {
+      command: "copilot-specs.openSpec",
+      title: "Open Spec",
+      arguments: [spec.name],
+    };
   }
 }
+
 
 export class SpecFileItem extends vscode.TreeItem {
   constructor(
     public readonly specName: string,
     public readonly fileType: "requirements" | "design" | "tasks",
     public readonly filePath: string,
+    specType: "feature" | "bugfix" | "quick" = "feature",
   ) {
-    const labels = {
-      requirements: "Requirements",
-      design: "Design",
-      tasks: "Tasks",
-    };
+    // Labels change for bugfix specs
+    const labels: Record<"requirements" | "design" | "tasks", string> =
+      specType === "bugfix"
+        ? { requirements: "Bug Analysis", design: "Fix Plan", tasks: "Tasks" }
+        : { requirements: "Requirements", design: "Design", tasks: "Tasks" };
+
     const icons = {
-      requirements: "list-ordered",
-      design: "symbol-structure",
+      requirements: specType === "bugfix" ? "search" : "list-ordered",
+      design: specType === "bugfix" ? "tools" : "symbol-structure",
       tasks: "checklist",
+    };
+    const fileNames = {
+      requirements: "requirements.instructions.md",
+      design: "design.instructions.md",
+      tasks: "tasks.instructions.md",
     };
     super(labels[fileType], vscode.TreeItemCollapsibleState.None);
     this.contextValue = `specFile-${fileType}`;
@@ -65,12 +114,16 @@ export class SpecFileItem extends vscode.TreeItem {
       icons[fileType],
       new vscode.ThemeColor(iconColors[fileType]),
     );
+    this.tooltip = new vscode.MarkdownString(
+      `**${labels[fileType]}**\n\n📄 \`.github/specs/${specName}/${fileNames[fileType]}\``,
+    );
     this.resourceUri = vscode.Uri.file(filePath);
     this.command = {
-      command: "vscode.open",
+      command: "copilot-specs.openSpecFile",
       title: "Open File",
-      arguments: [vscode.Uri.file(filePath)],
+      arguments: [filePath],
     };
+
   }
 }
 
@@ -131,9 +184,9 @@ export class SpecProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     if (element instanceof SpecItem) {
       const spec = element.spec;
       return [
-        new SpecFileItem(spec.name, "requirements", spec.requirementsPath),
-        new SpecFileItem(spec.name, "design", spec.designPath),
-        new SpecFileItem(spec.name, "tasks", spec.tasksPath),
+        new SpecFileItem(spec.name, "requirements", spec.requirementsPath, spec.specType),
+        new SpecFileItem(spec.name, "design", spec.designPath, spec.specType),
+        new SpecFileItem(spec.name, "tasks", spec.tasksPath, spec.specType),
       ];
     }
 
@@ -223,9 +276,29 @@ export class RulesFileItem extends vscode.TreeItem {
   }
 }
 
+export class WorkflowItem extends vscode.TreeItem {
+  constructor(
+    public readonly name: string,
+    public readonly filePath: string,
+  ) {
+    super(name, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = "workflow";
+    this.iconPath = new vscode.ThemeIcon(
+      "play-circle",
+      new vscode.ThemeColor("charts.green"),
+    );
+    this.resourceUri = vscode.Uri.file(filePath);
+    this.command = {
+      command: "vscode.open",
+      title: "Open Workflow File",
+      arguments: [vscode.Uri.file(filePath)],
+    };
+  }
+}
+
 export class SectionItem extends vscode.TreeItem {
   constructor(
-    public readonly kind: "instructions" | "rules" | "skills" | "prompts",
+    public readonly kind: "instructions" | "rules" | "skills" | "prompts" | "workflows",
     label: string,
     icon: string,
     childCount: number,
@@ -234,7 +307,7 @@ export class SectionItem extends vscode.TreeItem {
       label,
       childCount > 0
         ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.None,
+        : vscode.TreeItemCollapsibleState.Collapsed,
     );
     this.contextValue = `section-${kind}`;
     const sectionColors: Record<typeof kind, string> = {
@@ -242,6 +315,7 @@ export class SectionItem extends vscode.TreeItem {
       rules: "charts.orange",
       skills: "charts.purple",
       prompts: "charts.yellow",
+      workflows: "charts.green",
     };
     this.iconPath = new vscode.ThemeIcon(
       icon,
@@ -268,6 +342,9 @@ export class SteeringProvider implements vscode.TreeDataProvider<vscode.TreeItem
       { name: string; filePath: string }[]
     >,
     private readonly getPrompts: () => Promise<
+      { name: string; filePath: string }[]
+    > = async () => [],
+    private readonly getWorkflows: () => Promise<
       { name: string; filePath: string }[]
     > = async () => [],
   ) {}
@@ -299,17 +376,22 @@ export class SteeringProvider implements vscode.TreeDataProvider<vscode.TreeItem
           return (await this.getPrompts()).map(
             (p) => new PromptItem(p.name, p.filePath),
           );
+        case "workflows":
+          return (await this.getWorkflows()).map(
+            (w) => new WorkflowItem(w.name, w.filePath),
+          );
       }
     }
     if (element) {
       return [];
     }
 
-    const [instructions, rules, skills, prompts] = await Promise.all([
+    const [instructions, rules, skills, prompts, workflows] = await Promise.all([
       this.getInstructions(),
       this.getRules(),
       this.getSkills(),
       this.getPrompts(),
+      this.getWorkflows(),
     ]);
 
     return [
@@ -326,6 +408,12 @@ export class SteeringProvider implements vscode.TreeDataProvider<vscode.TreeItem
         "Prompts",
         "comment-discussion",
         prompts.length,
+      ),
+      new SectionItem(
+        "workflows",
+        "Workflows & Actions",
+        "play-circle",
+        workflows.length,
       ),
     ];
   }

@@ -5,45 +5,47 @@ applyTo: "{{FILE_GLOB}}"
 
 # {{SPEC_NAME}} — Requirements
 
-## Overview
+## Introduction
 
-> Describe the feature and its purpose in 2–3 sentences.
+> Describe the feature and its purpose in 2–3 sentences. What problem does it solve and for whom?
 
-## User Stories
+## Glossary
 
-### US-1: <!-- Short title -->
+- **Term**: Definition
+- **Term**: Definition
 
-**As a** <!-- role -->, **I want to** <!-- goal -->, **so that** <!-- benefit -->.
+## Requirements
 
-**Acceptance Criteria:**
+### Requirement 1: <!-- Short Title -->
 
-- REQ-01: WHEN <!-- condition --> THE SYSTEM SHALL <!-- behavior -->
-- REQ-02: WHEN <!-- condition --> THE SYSTEM SHALL <!-- behavior -->
-- REQ-03: IF <!-- precondition --> WHEN <!-- condition --> THE SYSTEM SHALL <!-- behavior -->
+**User Story:** As a <!-- role -->, I want <!-- goal -->, so that <!-- benefit -->.
 
-### US-2: <!-- Short title -->
+#### Acceptance Criteria
 
-**As a** <!-- role -->, **I want to** <!-- goal -->, **so that** <!-- benefit -->.
+1. THE System SHALL <!-- behavior -->
+2. WHEN <!-- condition -->, THE System SHALL <!-- behavior -->
+3. WHEN <!-- condition -->, THE System SHALL <!-- behavior --> within <!-- SLA -->
+4. IF <!-- precondition --> WHEN <!-- condition -->, THE System SHALL <!-- behavior -->
+5. FOR ALL <!-- items -->, THE System SHALL <!-- behavior -->
+6. WHILE <!-- state -->, THE System SHALL <!-- behavior -->
 
-**Acceptance Criteria:**
+### Requirement 2: <!-- Short Title -->
 
-- REQ-04: WHEN <!-- condition --> THE SYSTEM SHALL <!-- behavior -->
-- REQ-05: WHILE <!-- state --> THE SYSTEM SHALL <!-- behavior -->
+**User Story:** As a <!-- role -->, I want <!-- goal -->, so that <!-- benefit -->.
 
-## Requirement Inventory
+#### Acceptance Criteria
 
-<!-- Keep requirement IDs stable once tasks reference them. -->
-
-- REQ-01: <!-- concise statement -->
-- REQ-02: <!-- concise statement -->
-- REQ-03: <!-- concise statement -->
+1. THE System SHALL <!-- behavior -->
+2. WHEN <!-- condition -->, THE System SHALL <!-- behavior -->
 
 ## Non-Functional Requirements
 
-- **Performance:** <!-- e.g., Response time under 200ms -->
-- **Security:** <!-- e.g., All inputs sanitized -->
+- **Performance:** <!-- e.g., Response time under 200ms for 95th percentile -->
+- **Security:** <!-- e.g., All inputs sanitized, auth required -->
+- **Reliability:** <!-- e.g., 99.9% uptime, graceful degradation -->
 - **Accessibility:** <!-- e.g., WCAG 2.1 AA compliant -->
 
 ## Out of Scope
 
 - <!-- Explicitly list what is NOT included in this spec -->
+- <!-- This prevents scope creep and sets clear boundaries -->

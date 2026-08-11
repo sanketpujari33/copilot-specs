@@ -20,11 +20,11 @@ Or search for `Kiro for Copilot` in the VS Code Extensions panel (`Ctrl+Shift+X`
 ## Features
 
 - **Spec lifecycle**
-  - Create, rename, and delete specs under `.github/instructions/specs/<spec-name>/`
+  - Create, rename, and delete specs under `.github/specs/<spec-name>/`
   - Scaffold files from templates:
     - `requirements.instructions.md`
     - `design.instructions.md`
-    - `implementation-tasks.instructions.md`
+    - `tasks.instructions.md`
 
 - **Task tracking + progress**
   - Parse markdown checkbox tasks and subtasks
@@ -55,10 +55,10 @@ Or search for `Kiro for Copilot` in the VS Code Extensions panel (`Ctrl+Shift+X`
 
 1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=moonolgerd.kiro-for-copilot).
 2. Open a workspace and run `Copilot Specs: New Spec` from the Command Palette (`Ctrl+Shift+P`).
-3. Enter a name — three scaffold files are created under `.github/instructions/specs/<name>/`:
+3. Enter a name — three scaffold files are created under `.github/specs/<name>/`:
    - `requirements.instructions.md` — define what to build
    - `design.instructions.md` — describe the architecture
-   - `implementation-tasks.instructions.md` — break work into checkable tasks
+   - `tasks.instructions.md` — break work into checkable tasks
 4. Use the **@spec** chat participant in Copilot Chat to generate content:
    ```
    @spec create a user authentication feature

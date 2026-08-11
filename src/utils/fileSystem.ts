@@ -1,11 +1,26 @@
 import * as vscode from "vscode";
 
-export function getWorkspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+export function getWorkspaceUri(
+  targetUri?: vscode.Uri,
+): vscode.Uri | undefined {
+  if (targetUri) {
+    const folder = vscode.workspace.getWorkspaceFolder(targetUri);
+    if (folder) {
+      return folder.uri;
+    }
+  }
+  const activeUri = vscode.window.activeTextEditor?.document.uri;
+  if (activeUri) {
+    const folder = vscode.workspace.getWorkspaceFolder(activeUri);
+    if (folder) {
+      return folder.uri;
+    }
+  }
+  return vscode.workspace.workspaceFolders?.[0]?.uri;
 }
 
-export function getWorkspaceUri(): vscode.Uri | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri;
+export function getWorkspaceRoot(targetUri?: vscode.Uri): string | undefined {
+  return getWorkspaceUri(targetUri)?.fsPath;
 }
 
 export function resolveWorkspacePath(
@@ -16,6 +31,10 @@ export function resolveWorkspacePath(
     return undefined;
   }
   return vscode.Uri.joinPath(root, ...segments);
+}
+
+export function isWorkspaceTrusted(): boolean {
+  return vscode.workspace.isTrusted;
 }
 
 export async function fileExists(uri: vscode.Uri): Promise<boolean> {
@@ -110,12 +129,149 @@ export async function renameUri(
 // Spec-specific path helpers — use forward slashes so these work as glob patterns on all platforms
 export const GITHUB_DIR = ".github";
 export const INSTRUCTIONS_DIR = ".github/instructions";
-export const INSTRUCTIONS_SPECS_DIR = ".github/instructions/specs";
+/** Specs are stored separately from instructions for clean separation of concerns. */
+export const SPECS_DIR = ".github/specs";
+/** @deprecated Use SPECS_DIR. Kept as an alias so all existing imports continue to work. */
+export const INSTRUCTIONS_SPECS_DIR = SPECS_DIR;
 export const SKILLS_DIR = ".github/skills";
 export const HOOKS_DIR = ".github/hooks";
 export const PROMPTS_DIR = ".github/prompts";
-export const PROMPTS_SPECS_DIR = ".github/prompts/specs";
+export const WORKFLOWS_DIR = ".github/workflows";
+export const AGENTS_DIR = ".github/agents";
+export const STEERING_DIR = ".github/steering";
 export const COPILOT_INSTRUCTIONS_FILE = ".github/copilot-instructions.md";
+
+/**
+ * List individual steering files under .github/steering/ (.md files).
+ */
+export async function listSteeringFiles(): Promise<
+  { name: string; uri: vscode.Uri }[]
+> {
+  const dir = resolveWorkspacePath(STEERING_DIR);
+  if (!dir || !(await fileExists(dir))) {
+    return [];
+  }
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    return entries
+      .filter(
+        ([name, type]) =>
+          type === vscode.FileType.File && name.endsWith(".md"),
+      )
+      .map(([name]) => ({
+        name: name.replace(/\.md$/, ""),
+        uri: vscode.Uri.joinPath(dir, name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * List workflow files under .github/workflows/ (.yml, .yaml, and .md files).
+ */
+export async function listWorkflowFiles(): Promise<
+  { name: string; uri: vscode.Uri }[]
+> {
+  const dir = resolveWorkspacePath(WORKFLOWS_DIR);
+  if (!dir || !(await fileExists(dir))) {
+    return [];
+  }
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    return entries
+      .filter(
+        ([name, type]) =>
+          type === vscode.FileType.File &&
+          (name.endsWith(".yml") || name.endsWith(".yaml") || name.endsWith(".md")),
+      )
+      .map(([name]) => ({
+        name,
+        uri: vscode.Uri.joinPath(dir, name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * List agent files under .github/agents/.
+ */
+export async function listAgentFiles(): Promise<
+  { name: string; uri: vscode.Uri }[]
+> {
+  const dir = resolveWorkspacePath(AGENTS_DIR);
+  if (!dir || !(await fileExists(dir))) {
+    return [];
+  }
+
+  const agentsByPath = new Map<string, { name: string; uri: vscode.Uri }>();
+
+  // 1) Nested AGENT.md: .github/agents/<agent-name>/AGENT.md
+  try {
+    const nestedAgentFiles = await vscode.workspace.findFiles(
+      `${AGENTS_DIR}/**/AGENT.md`,
+    );
+    for (const uri of nestedAgentFiles) {
+      const parts = uri.path.split("/");
+      const agentDir = parts.length >= 2 ? parts[parts.length - 2] : "agent";
+      agentsByPath.set(uri.toString(), { name: agentDir, uri });
+    }
+  } catch {}
+
+  // 2) Top-level .agent.md or .md files in .github/agents/
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    for (const [name, type] of entries) {
+      if (
+        type === vscode.FileType.File &&
+        (name.endsWith(".agent.md") || name.endsWith(".md"))
+      ) {
+        const uri = vscode.Uri.joinPath(dir, name);
+        agentsByPath.set(uri.toString(), {
+          name: name.replace(/(\.agent)?\.md$/, ""),
+          uri,
+        });
+      }
+    }
+  } catch {}
+
+  return [...agentsByPath.values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+}
+
+/**
+ * List hook files under .github/hooks/.
+ */
+export async function listHookFiles(): Promise<
+  { name: string; uri: vscode.Uri }[]
+> {
+  const dir = resolveWorkspacePath(HOOKS_DIR);
+  if (!dir || !(await fileExists(dir))) {
+    return [];
+  }
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(dir);
+    return entries
+      .filter(
+        ([name, type]) =>
+          type === vscode.FileType.File &&
+          (name.endsWith(".json") ||
+            name.endsWith(".sh") ||
+            name.endsWith(".js")),
+      )
+      .map(([name]) => ({
+        name: name.replace(/\.(json|sh|js)$/, ""),
+        uri: vscode.Uri.joinPath(dir, name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * List top-level instruction/rules files under .github/instructions/ (excludes specs subdir).
@@ -205,12 +361,12 @@ export async function listPromptFiles(): Promise<
 }
 
 export function specsInstructionsUri(specName: string): vscode.Uri | undefined {
-  return resolveWorkspacePath(INSTRUCTIONS_SPECS_DIR, specName);
+  return resolveWorkspacePath(SPECS_DIR, specName);
 }
 
 export function requirementsUri(specName: string): vscode.Uri | undefined {
   return resolveWorkspacePath(
-    INSTRUCTIONS_SPECS_DIR,
+    SPECS_DIR,
     specName,
     "requirements.instructions.md",
   );
@@ -218,7 +374,7 @@ export function requirementsUri(specName: string): vscode.Uri | undefined {
 
 export function designUri(specName: string): vscode.Uri | undefined {
   return resolveWorkspacePath(
-    INSTRUCTIONS_SPECS_DIR,
+    SPECS_DIR,
     specName,
     "design.instructions.md",
   );
@@ -226,14 +382,21 @@ export function designUri(specName: string): vscode.Uri | undefined {
 
 export function tasksUri(specName: string): vscode.Uri | undefined {
   return resolveWorkspacePath(
-    INSTRUCTIONS_SPECS_DIR,
+    SPECS_DIR,
     specName,
-    "implementation-tasks.instructions.md",
+    "tasks.instructions.md",
   );
 }
 
 export function linksUri(specName: string): vscode.Uri | undefined {
   return resolveWorkspacePath(".copilot-specs-cache", `${specName}.links.json`);
+}
+
+export function specConfigUri(specName: string): vscode.Uri | undefined {
+  return resolveWorkspacePath(
+    ".copilot-specs-cache",
+    `${specName}.config.json`,
+  );
 }
 
 export function copilotInstructionsUri(): vscode.Uri | undefined {

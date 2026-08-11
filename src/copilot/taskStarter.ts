@@ -191,9 +191,13 @@ export async function buildStartTaskPrompt(
 
 export async function buildRunAllTasksVerificationPrompt(
   specName: string,
+  onlyRequired = false,
 ): Promise<string> {
   const spec = await loadSpec(specName);
-  const { tasks } = await loadTasks(specName);
+  let { tasks } = await loadTasks(specName);
+  if (onlyRequired) {
+    tasks = tasks.filter((t) => t.autoVerified);
+  }
 
   const pending = tasks.filter((t) => !t.completed);
   const completed = tasks.filter((t) => t.completed);
@@ -204,10 +208,10 @@ export async function buildRunAllTasksVerificationPrompt(
 
   const parts: string[] = [];
   parts.push(
-    `You are verifying implementation progress for the **${specName}** spec.`,
+    `You are verifying ${onlyRequired ? "**required** " : ""}implementation progress for the **${specName}** spec.`,
     "",
     `## Verification Goal`,
-    `Validate every task and sub-task against the current codebase, then update task status to match reality.`,
+    `Validate ${onlyRequired ? "required " : "every "}task and sub-task against the current codebase, then update task status to match reality.`,
     "",
     `## Spec Context`,
     `- Spec name: ${specName}`,
@@ -216,7 +220,7 @@ export async function buildRunAllTasksVerificationPrompt(
     `- Design file: ${designFileUri?.fsPath ?? "(not found)"}`,
     `- Tasks file: ${tasksFileUri?.fsPath ?? "(not found)"}`,
     "",
-    `## Task Summary`,
+    `## Task Summary (${onlyRequired ? "Required Tasks" : "All Tasks"})`,
     `- Total: ${tasks.length}`,
     `- Completed currently: ${completed.length}`,
     `- Pending currently: ${pending.length}`,
@@ -244,7 +248,7 @@ export async function buildRunAllTasksVerificationPrompt(
     "1. Read requirements, design, tasks docs, and relevant implementation files in scope.",
     "2. Verify each task/sub-task with concrete code evidence.",
     "3. Run appropriate build/tests for verification.",
-    "4. Update `implementation-tasks.instructions.md` checkboxes so task state reflects actual completion.",
+    "4. Update `tasks.instructions.md` checkboxes so task state reflects actual completion.",
     "5. Return a concise verification report with: completed, still-pending, and any blockers.",
     "",
     "Do not perform unrelated refactors.",

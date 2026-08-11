@@ -26,11 +26,11 @@ Or search for `copilot-specs` in the VS Code Extensions panel (`Ctrl+Shift+X`).
 ## Features
 
 - **Spec lifecycle**
-  - Create, rename, and delete specs under `.github/instructions/specs/<spec-name>/`
+  - Create, rename, and delete specs under `.github/specs/<spec-name>/`
   - Scaffold files from templates:
     - `requirements.instructions.md`
     - `design.instructions.md`
-    - `implementation-tasks.instructions.md`
+    - `tasks.instructions.md`
 
 - **Task tracking + progress**
   - Parse markdown checkbox tasks and subtasks
@@ -61,10 +61,10 @@ Or search for `copilot-specs` in the VS Code Extensions panel (`Ctrl+Shift+X`).
 
 1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=moonolgerd.copilot-specs).
 2. Open a workspace and run `Copilot Specs: New Spec` from the Command Palette (`Ctrl+Shift+P`).
-3. Enter a name — three scaffold files are created under `.github/instructions/specs/<name>/`:
+3. Enter a name — three scaffold files are created under `.github/specs/<name>/`:
    - `requirements.instructions.md` — define what to build
    - `design.instructions.md` — describe the architecture
-   - `implementation-tasks.instructions.md` — break work into checkable tasks
+   - `tasks.instructions.md` — break work into checkable tasks
 4. Use the **@spec** chat participant in Copilot Chat to generate content:
    ```
    @spec create a user authentication feature
@@ -161,7 +161,8 @@ On tag pushes (`v*`), the release workflow uses `both` and attempts to publish b
 
 - `src/` — extension source
 - `src/templates/` — default spec templates
-- `.github/instructions/specs/` — generated/managed spec docs in a workspace
+- `.github/specs/` — spec docs (requirements, design, tasks) per feature
+- `.github/instructions/` — global rules/instruction files
 - `.github/prompts/` — reusable prompt files (`.prompt.md`)
 - `.github/hooks/` — hook JSON definitions
 

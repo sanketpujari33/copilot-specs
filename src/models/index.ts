@@ -1,3 +1,13 @@
+export type SpecType = "feature" | "bugfix" | "quick";
+export type WorkflowType = "requirements-first" | "tech-design-first" | "quick";
+
+export interface SpecConfig {
+  specId: string;
+  specType: SpecType;
+  workflowType: WorkflowType;
+  createdAt: string;
+}
+
 export interface Spec {
   name: string;
   fileGlob: string;
@@ -5,6 +15,8 @@ export interface Spec {
   designPath: string;
   tasksPath: string;
   linksPath: string;
+  specType: SpecType;
+  workflowType: WorkflowType;
 }
 
 export interface Task {
@@ -15,17 +27,27 @@ export interface Task {
   lineIndex: number;
   subTasks: SubTask[];
   requirementIds?: string[];
+  phase?: string;
+  autoVerified?: boolean;
 }
 
 export interface SubTask {
   title: string;
   completed: boolean;
   lineIndex: number;
+  autoVerified?: boolean;
+}
+
+export interface PhaseProgress {
+  name: string;
+  total: number;
+  completed: number;
 }
 
 export interface TaskProgress {
   total: number;
   completed: number;
+  phases?: PhaseProgress[];
 }
 
 export type HookEventName =

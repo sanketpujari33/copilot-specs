@@ -36,7 +36,7 @@ src/utils/frontmatter.ts  ← YAML frontmatter parse/serialize/strip (js-yaml).
 
 ---
 
-## Spec Storage Layout
+## Spec Storage Layout & Auto-Creation Workflow
 
 ```
 .github/instructions/specs/<name>/
@@ -49,6 +49,26 @@ src/utils/frontmatter.ts  ← YAML frontmatter parse/serialize/strip (js-yaml).
 ```
 
 Frontmatter fields (YAML): `name`, `applyTo`, `description`.
+
+---
+
+## On-Click & Automated Spec Generation Protocol
+
+When an On-Click event occurs (e.g., clicking **New Spec** in the tree view, clicking **Start Task** CodeLens, or invoking `@spec /create <name>`):
+
+1. **Auto Folder & File Scaffolding**:
+   - Automatically creates directory `.github/instructions/specs/<spec-name>/`.
+   - Populates three standard scaffold files from templates: `requirements.instructions.md`, `design.instructions.md`, and `implementation-tasks.instructions.md`.
+   - Initializes empty task links cache at `.copilot-specs-cache/<spec-name>.links.json`.
+
+2. **Copilot AI Auto-Generation Rules**:
+   - **Requirements Generation**: Must define user stories, functional criteria, and assign REQ-xx identifiers.
+   - **Design Generation**: Must describe target architecture, data models, and component boundaries.
+   - **Tasks Generation**: Must emit markdown checkboxes with HTML task markers (`- [ ] <!-- task:T1 --> Task title <!-- requires:REQ-01 -->`).
+
+3. **Auto-Trigger Agent Execution**:
+   - Clicking **Start Task** in CodeLens opens an agent-mode prompt pre-populated with requirement context, steering rules, and target task.
+   - Clicking **Verify All Tasks with Copilot** initiates spec-wide verification against active workspace code.
 
 ---
 
@@ -141,3 +161,37 @@ Build output: `dist/extension.js` (CJS, target node18, `vscode` externalized).
 - Package: `npx @vscode/vsce package`
 - Publish: triggered by `v*` tag push (see `.github/workflows/release.yml`); requires `VSCE_PAT` secret
 - `CHANGELOG.md` follows Keep a Changelog format — update `[Unreleased]` on every meaningful change
+
+---
+
+## Agentic Core Architecture (7 Components)
+
+The extension unifies seven agentic building blocks under GitHub Copilot:
+
+| Component | Purpose & Workspace Location | Trigger & Integration |
+|---|---|---|
+| **1. Instructions & Rules** | Global coding standards & safety rules (`.github/copilot-instructions.md`, `.github/instructions/*.md`) | Always active in LLM prompt context |
+| **2. Skills** | Domain-specific expert packages (`.github/skills/*/SKILL.md`) | Loaded dynamically per task domain |
+| **3. Prompts** | Reusable prompt templates (`.github/prompts/*.prompt.md`) | Invoked via `/command` or chat prompts |
+| **4. Workflows** | Multi-phase operational procedures (`.github/workflows/*.md`) | Followed during spec execution phases |
+| **5. Tools** | Executable APIs (`src/copilot/lmTools.ts`, `src/todos/lmTools.ts`, MCP) | Autonomous LLM tool invocation |
+| **6. Hooks & Actions** | Lifecycle event handlers (`.github/hooks/*.json`) | Fired on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, etc. |
+| **7. Subagents** | Delegated background workers (`.github/agents/`) | Spawned for parallel or specialized tasks |
+
+---
+
+## Automated TODO Engine (`src/todos/`)
+
+- **Template Matching**: Evaluates `.todo.json` templates against workspace files using `applyTo` globs, `fileContains`, and `excludeFileContains` rules.
+- **Git Branch Awareness**: `gitTodoService.ts` tracks active git branch to scope TODO instances per branch or globally.
+- **File Watcher**: `fileWatcher.ts` updates active TODO tree items in real-time as workspace files change.
+- **LM Tools Integration**: Registers Language Model tools (`registerTodoLMTools`) allowing Copilot agents to list, create, complete, or ignore workspace TODOs programmatically.
+
+---
+
+## MCP (Model Context Protocol) Discovery & Management (`src/mcpManager.ts`)
+
+- **Discovery**: Automatically scans workspace configs (`.github/mcp.json`, `.vscode/mcp.json`, `.mcp.json`, `mcp.json`) and User profile configs (`Code/User/mcp.json`, `Code - Insiders/User/mcp.json`).
+- **Parsing**: Robust JSONC parser supporting block comments, line comments, and trailing commas.
+- **State Toggling**: `setMcpServerEnabled` safely enables or disables MCP servers across configuration files.
+

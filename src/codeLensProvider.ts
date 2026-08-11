@@ -148,10 +148,18 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
       );
     }
 
+    const specNameFromDesignDoc =
+      getSpecNameFromDesignDocumentPath(filePath);
+    if (specNameFromDesignDoc) {
+      return this.provideTaskDocumentCodeLenses(
+        document,
+        specNameFromDesignDoc,
+      );
+    }
+
     if (
       normalizedPath.includes("/.git/") ||
-      normalizedPath.includes("/node_modules/") ||
-      normalizedPath.includes("/.github/")
+      normalizedPath.includes("/node_modules/")
     ) {
       return [];
     }
@@ -284,7 +292,11 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
     document: vscode.TextDocument,
     specName: string,
   ): Promise<vscode.CodeLens[]> {
-    const { tasks } = await loadTasks(specName);
+    let { tasks } = await loadTasks(specName);
+    if (tasks.length === 0) {
+      const { parseTasks } = await import("./taskManager.js");
+      tasks = parseTasks(document.getText(), specName).tasks;
+    }
     if (tasks.length === 0) {
       return [];
     }
@@ -293,13 +305,52 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
     const { requirementsUri, tasksUri } = await import("./utils/fileSystem.js");
     const reqUri = requirementsUri(specName);
     const tasksUriVal = tasksUri(specName);
-    const requirementBlocks = reqUri
+    const requirementBlocks = reqUri && (await fileExists(reqUri))
       ? buildRequirementBlocks((await readTextFile(reqUri)).split("\n"))
       : new Map<string, RequirementBlock>();
-    const taskBlocks = tasksUriVal
+    const taskBlocks = tasksUriVal && (await fileExists(tasksUriVal))
       ? buildTaskBlocks(await readTextFile(tasksUriVal), tasks)
-      : new Map<string, string>();
+      : buildTaskBlocks(document.getText(), tasks);
     const lenses: vscode.CodeLens[] = [];
+    const topRange = new vscode.Range(0, 0, 0, 0);
+
+    lenses.push(
+      new vscode.CodeLens(topRange, {
+        title: `Spec: ${specName}`,
+        command: "copilot-specs.openSpec",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "1 Requirements",
+        command: "copilot-specs.openSpecRequirements",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "2 Design",
+        command: "copilot-specs.openSpecDesign",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "3 Task list",
+        command: "copilot-specs.openSpecTasks",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "$(sync) Sync Files",
+        command: "copilot-specs.syncTasks",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "$(play) Run all tasks",
+        command: "copilot-specs.runAllTasks",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "$(check-all) Run required tasks",
+        command: "copilot-specs.runRequiredTasks",
+        arguments: [specName],
+      }),
+    );
 
     for (const task of tasks) {
       const linkedFiles = links[task.id] ?? [];
@@ -356,14 +407,12 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
         );
       }
 
-      const taskLineText = document.lineAt(line).text.trimStart();
-      const isHeadingTask = taskLineText.startsWith("###");
       const inProgress = this.isTaskInProgress(specName, task.id);
 
       if (inProgress) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: "$(sync~spin)  In progress",
+            title: "$(sync~spin) In progress",
             command: "",
             tooltip: `Task ${task.id} is being worked on`,
           }),
@@ -371,32 +420,36 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
       } else if (task.completed) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: "$(pass-filled)  Task Completed",
+            title: "$(pass-filled) Task completed",
             command: "",
-            tooltip: `All subtasks for ${task.id} are complete`,
+            tooltip: `Task ${task.id} is completed`,
+          }),
+          new vscode.CodeLens(range, {
+            title: "$(comment-discussion) View session",
+            command: "copilot-specs.startTask",
+            arguments: [specName, task.id],
+            tooltip: `View task ${task.id} execution context`,
           }),
         );
       } else if (!task.completed) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: isHeadingTask
-              ? "$(circle-large-outline)  Start task"
-              : "$(play)  Start task",
+            title: "$(zap) Start task",
             command: "copilot-specs.startTask",
             arguments: [specName, task.id],
             tooltip: `Start task ${task.id} with Copilot`,
           }),
+          new vscode.CodeLens(range, {
+            title: task.autoVerified
+              ? "$(list-ordered) Make task optional"
+              : "$(list-ordered) Make task required",
+            command: "copilot-specs.toggleTaskRequired",
+            arguments: [specName, task.id],
+            tooltip: task.autoVerified
+              ? `Remove required flag (*) from task ${task.id}`
+              : `Make task ${task.id} required (*)`,
+          }),
         );
-        if (isHeadingTask) {
-          lenses.push(
-            new vscode.CodeLens(range, {
-              title: "$(check)  Mark complete",
-              command: "copilot-specs.markTaskComplete",
-              arguments: [specName, task.id],
-              tooltip: `Mark task ${task.id} and all its sub-tasks as complete`,
-            }),
-          );
-        }
       }
     }
 
@@ -418,6 +471,45 @@ export class SpecCodeLensProvider implements vscode.CodeLensProvider {
       ? buildTaskBlocks(await readTextFile(tasksFileUri), tasks)
       : new Map<string, string>();
     const lenses: vscode.CodeLens[] = [];
+    const topRange = new vscode.Range(0, 0, 0, 0);
+
+    lenses.push(
+      new vscode.CodeLens(topRange, {
+        title: `Spec: ${specName}`,
+        command: "copilot-specs.openSpec",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "1 Requirements",
+        command: "copilot-specs.openSpecRequirements",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "2 Design",
+        command: "copilot-specs.openSpecDesign",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "3 Task list",
+        command: "copilot-specs.openSpecTasks",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "$(sparkle) Update requirements",
+        command: "copilot-specs.generateWithCopilot",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "$(search) Analyze Requirements",
+        command: "copilot-specs.analyzeRequirements",
+        arguments: [specName],
+      }),
+      new vscode.CodeLens(topRange, {
+        title: "$(pass) Check Correctness",
+        command: "copilot-specs.checkCorrectness",
+        arguments: [specName],
+      }),
+    );
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -1395,21 +1487,49 @@ function extractRequirementIdsFromLine(
 function getSpecNameFromTasksDocumentPath(
   filePath: string,
 ): string | undefined {
-  const normalized = filePath.replace(/\\/g, "/");
-  const match = normalized.match(
-    /\.github\/instructions\/specs\/([^/]+)\/implementation-tasks\.instructions\.md$/i,
-  );
-  return match?.[1];
+  const fileName = path.basename(filePath).toLowerCase();
+  const taskDocNames = [
+    "tasks.instructions.md",
+    "implementation-tasks.instructions.md",
+    "tasks.md",
+    "tasks-quick.template.md",
+  ];
+  if (taskDocNames.includes(fileName)) {
+    return path.basename(path.dirname(filePath));
+  }
+  return undefined;
 }
 
 function getSpecNameFromRequirementsDocumentPath(
   filePath: string,
 ): string | undefined {
-  const normalized = filePath.replace(/\\/g, "/");
-  const match = normalized.match(
-    /\.github\/instructions\/specs\/([^/]+)\/requirements\.instructions\.md$/i,
-  );
-  return match?.[1];
+  const fileName = path.basename(filePath).toLowerCase();
+  const reqDocNames = [
+    "requirements.instructions.md",
+    "requirements.md",
+    "bugfix-analysis.md",
+    "bugfix-analysis.template.md",
+  ];
+  if (reqDocNames.includes(fileName)) {
+    return path.basename(path.dirname(filePath));
+  }
+  return undefined;
+}
+
+function getSpecNameFromDesignDocumentPath(
+  filePath: string,
+): string | undefined {
+  const fileName = path.basename(filePath).toLowerCase();
+  const designDocNames = [
+    "design.instructions.md",
+    "design.md",
+    "fix-plan.md",
+    "fix-plan.template.md",
+  ];
+  if (designDocNames.includes(fileName)) {
+    return path.basename(path.dirname(filePath));
+  }
+  return undefined;
 }
 
 function sanitizeLinks(links: SpecLinks): {

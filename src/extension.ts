@@ -4,6 +4,9 @@ import * as path from "node:path";
 import {
   initTemplates,
   promptCreateSpec,
+  promptCreateBugfixSpec,
+  promptCreateQuickSpec,
+  promptCreateSpecWizard,
   listSpecs,
   deleteSpec,
   renameSpec,
@@ -55,6 +58,7 @@ import {
   buildRunAllTasksVerificationPrompt,
 } from "./copilot/taskStarter.js";
 import { runAutopilot } from "./autopilot.js";
+import { promptSelectModel } from "./copilot/specGenerator.js";
 import {
   listMcpConfigTargets,
   listMcpServers,
@@ -62,7 +66,7 @@ import {
   getPreferredWorkspaceMcpConfigPath,
 } from "./mcpManager.js";
 import {
-  INSTRUCTIONS_SPECS_DIR,
+  SPECS_DIR,
   INSTRUCTIONS_DIR,
   HOOKS_DIR,
   PROMPTS_DIR,
@@ -71,10 +75,25 @@ import {
   listSkillFiles,
   listInstructionRulesFiles,
   listPromptFiles,
+  listWorkflowFiles,
+  WORKFLOWS_DIR,
   ensureGitignoreEntry,
+  resolveWorkspacePath,
 } from "./utils/fileSystem.js";
 import { Task } from "./models/index.js";
 import { HookEventName } from "./models/index.js";
+import { GitTodoService } from "./todos/gitTodoService.js";
+import { TodoManager } from "./todos/todoManager.js";
+import { TodoProvider } from "./todos/todoProvider.js";
+import { FileWatcher as TodoFileWatcher } from "./todos/fileWatcher.js";
+import { registerLanguageModelTools as registerTodoLMTools } from "./todos/lmTools.js";
+import { registerSpecLMTools } from "./copilot/lmTools.js";
+import { TodoInstance } from "./todos/types.js";
+import { TODO_PRESETS } from "./todos/presets.js";
+import {
+  SteeringEvaluator,
+  SteeringCodeActionProvider,
+} from "./steeringEvaluator.js";
 
 export function activate(context: vscode.ExtensionContext): void {
   const extensionPath = context.extensionPath;
@@ -95,9 +114,21 @@ export function activate(context: vscode.ExtensionContext): void {
       if (ciUri && (await fileExists(ciUri))) {
         items.push({ name: "copilot-instructions.md", filePath: ciUri.fsPath });
       }
+      const potentialInstructions = [
+        resolveWorkspacePath("copilot-instructions.md"),
+        resolveWorkspacePath(".github", "AGENTS.md"),
+        resolveWorkspacePath("AGENTS.md"),
+      ];
+      for (const uri of potentialInstructions) {
+        if (uri && (await fileExists(uri)) && !items.some((i) => i.filePath === uri.fsPath)) {
+          items.push({ name: path.basename(uri.fsPath), filePath: uri.fsPath });
+        }
+      }
       const entries = await readAllSteering();
       for (const e of entries) {
-        items.push({ name: e.name, filePath: e.filePath });
+        if (!items.some((i) => i.name === e.name)) {
+          items.push({ name: e.name, filePath: e.filePath });
+        }
       }
       return items;
     },
@@ -112,6 +143,10 @@ export function activate(context: vscode.ExtensionContext): void {
     async () => {
       const prompts = await listPromptFiles();
       return prompts.map((p) => ({ name: p.name, filePath: p.uri.fsPath }));
+    },
+    async () => {
+      const workflows = await listWorkflowFiles();
+      return workflows.map((w) => ({ name: w.name, filePath: w.uri.fsPath }));
     },
   );
   const hooksProvider = new HooksProvider(async () => {
@@ -140,6 +175,48 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  // ── Developer Todos Setup ──────────────────────────────────────────────────
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  const workspaceRoot = workspaceFolders?.[0]?.uri.fsPath || "";
+
+  const gitTodoService = new GitTodoService();
+  const todoManager = new TodoManager(context, gitTodoService, workspaceRoot);
+  void todoManager.initialize();
+
+  const todoProvider = new TodoProvider(todoManager, gitTodoService);
+  const todoTreeView = vscode.window.createTreeView("copilot-specs.developerTodosView", {
+    treeDataProvider: todoProvider,
+    showCollapseAll: true,
+  });
+
+  const updateTodoTreeViewDescription = () => {
+    todoTreeView.description = todoProvider.getDescription();
+  };
+  updateTodoTreeViewDescription();
+  todoManager.onTodosChanged(updateTodoTreeViewDescription);
+
+  const todoFileWatcher = new TodoFileWatcher(todoManager, gitTodoService);
+  registerTodoLMTools(context, todoManager, gitTodoService);
+  registerSpecLMTools(context);
+
+  if (workspaceRoot && !todoManager.hasConfig()) {
+    void vscode.window
+      .showInformationMessage(
+        "Developer Todos: No .todo.json found in workspace. Create one to get started!",
+        "Create Example"
+      )
+      .then((selection) => {
+        if (selection === "Create Example") {
+          void createExampleConfig(workspaceRoot);
+        }
+      });
+  }
+
+  gitTodoService.onBranchChange(async (newBranch) => {
+    await todoManager.switchBranch(newBranch);
+    updateTodoTreeViewDescription();
+  });
+
   vscode.window.registerTreeDataProvider(
     "copilot-specs.steeringExplorer",
     steeringProvider,
@@ -162,6 +239,8 @@ export function activate(context: vscode.ExtensionContext): void {
       showCollapseAll: true,
     }),
   );
+  context.subscriptions.push(todoTreeView);
+  context.subscriptions.push(gitTodoService, todoManager, todoFileWatcher);
 
   // ── CodeLens ────────────────────────────────────────────────────────────────
 
@@ -235,7 +314,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }, 1200);
   };
 
-  makeWatcher(`${INSTRUCTIONS_SPECS_DIR}/**`, () => {
+  makeWatcher(`${SPECS_DIR}/**`, () => {
+    refreshAll();
+    scheduleAutoLink();
+  });
+  makeWatcher(".kiro/specs/**", () => {
     refreshAll();
     scheduleAutoLink();
   });
@@ -252,6 +335,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   makeWatcher(".github/skills/**", () => steeringProvider.refresh());
   makeWatcher(`${PROMPTS_DIR}/**`, () => steeringProvider.refresh());
+  makeWatcher(`${WORKFLOWS_DIR}/**`, () => steeringProvider.refresh());
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
@@ -271,7 +355,7 @@ export function activate(context: vscode.ExtensionContext): void {
   function isSpecInstructionFile(uri: vscode.Uri): boolean {
     return (
       uri.fsPath.endsWith(".instructions.md") &&
-      uri.fsPath.includes(INSTRUCTIONS_SPECS_DIR.replace(/\//g, path.sep))
+      uri.fsPath.includes(SPECS_DIR.replace(/\//g, path.sep))
     );
   }
 
@@ -317,6 +401,39 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  // ── Steering Evaluator ──────────────────────────────────────────────────────
+
+  const steeringEvaluator = new SteeringEvaluator();
+  context.subscriptions.push(steeringEvaluator);
+
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      [{ language: "markdown" }, { language: "json" }],
+      new SteeringCodeActionProvider(),
+      {
+        providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+      },
+    ),
+  );
+
+  // Validate on open/save
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      void steeringEvaluator.evaluateDocument(document);
+    }),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      void steeringEvaluator.evaluateDocument(document);
+    }),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      steeringEvaluator.collection.delete(document.uri);
+    }),
+  );
+
+  // Validate existing on startup
+  for (const document of vscode.workspace.textDocuments) {
+    void steeringEvaluator.evaluateDocument(document);
+  }
 
   // ── Status Bar ──────────────────────────────────────────────────────────────
 
@@ -364,12 +481,172 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Commands ─────────────────────────────────────────────────────────────────
 
-  const cmds: [string, (...args: unknown[]) => unknown][] = [
+  const cmds: [string, (...args: any[]) => any][] = [
     [
       "copilot-specs.newSpec",
       async () => {
         await promptCreateSpec();
         refreshAll();
+      },
+    ],
+    [
+      "copilot-specs.newBugfixSpec",
+      async () => {
+        await promptCreateBugfixSpec();
+        refreshAll();
+      },
+    ],
+    [
+      "copilot-specs.newQuickSpec",
+      async () => {
+        await promptCreateQuickSpec();
+        refreshAll();
+      },
+    ],
+    [
+      "copilot-specs.createSpecWizard",
+      async () => {
+        await promptCreateSpecWizard();
+        refreshAll();
+      },
+    ],
+
+    [
+      "copilot-specs.openSpec",
+      async (specNameOrItem?: unknown) => {
+        const name =
+          typeof specNameOrItem === "string"
+            ? specNameOrItem
+            : resolveSpecName(specNameOrItem);
+        if (!name) {
+          return;
+        }
+        const spec = await loadSpec(name);
+        if (!spec) {
+          return;
+        }
+
+        const reqUri = vscode.Uri.file(spec.requirementsPath);
+        try {
+          const doc = await vscode.workspace.openTextDocument(reqUri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to open requirements for spec "${name}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.openSpecFile",
+      async (filePathOrItem?: unknown) => {
+        let filePath: string | undefined;
+        if (typeof filePathOrItem === "string") {
+          filePath = filePathOrItem;
+        } else if (
+          filePathOrItem &&
+          typeof (filePathOrItem as any).filePath === "string"
+        ) {
+          filePath = (filePathOrItem as any).filePath;
+        } else if (
+          filePathOrItem &&
+          typeof (filePathOrItem as any).resourceUri?.fsPath === "string"
+        ) {
+          filePath = (filePathOrItem as any).resourceUri.fsPath;
+        }
+
+        if (!filePath) {
+          return;
+        }
+
+        const uri = vscode.Uri.file(filePath);
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to open spec file: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.openSpecRequirements",
+      async (specNameOrItem?: unknown) => {
+        const name =
+          typeof specNameOrItem === "string"
+            ? specNameOrItem
+            : resolveSpecName(specNameOrItem);
+        if (!name) {
+          return;
+        }
+        const spec = await loadSpec(name);
+        if (!spec) {
+          return;
+        }
+        const uri = vscode.Uri.file(spec.requirementsPath);
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to open requirements for spec "${name}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.openSpecDesign",
+      async (specNameOrItem?: unknown) => {
+        const name =
+          typeof specNameOrItem === "string"
+            ? specNameOrItem
+            : resolveSpecName(specNameOrItem);
+        if (!name) {
+          return;
+        }
+        const spec = await loadSpec(name);
+        if (!spec) {
+          return;
+        }
+        const uri = vscode.Uri.file(spec.designPath);
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to open design for spec "${name}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.openSpecTasks",
+      async (specNameOrItem?: unknown) => {
+        const name =
+          typeof specNameOrItem === "string"
+            ? specNameOrItem
+            : resolveSpecName(specNameOrItem);
+        if (!name) {
+          return;
+        }
+        const spec = await loadSpec(name);
+        if (!spec) {
+          return;
+        }
+        const uri = vscode.Uri.file(spec.tasksPath);
+        try {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to open tasks for spec "${name}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       },
     ],
 
@@ -423,6 +700,93 @@ export function activate(context: vscode.ExtensionContext): void {
         const specArg = name ? `create ${name}` : "";
         await vscode.commands.executeCommand("workbench.action.chat.open", {
           query: `@spec ${specArg}`,
+        });
+      },
+    ],
+
+    [
+      "copilot-specs.startImplementation",
+      async (specNameOrItem?: unknown) => {
+        const name =
+          typeof specNameOrItem === "string"
+            ? specNameOrItem
+            : resolveSpecName(specNameOrItem);
+        if (!name) {
+          return;
+        }
+        const spec = await loadSpec(name);
+        if (!spec) {
+          return;
+        }
+        try {
+          const doc = await vscode.workspace.openTextDocument(
+            vscode.Uri.file(spec.tasksPath),
+          );
+          await vscode.window.showTextDocument(doc, { preview: false });
+        } catch (err) {
+          console.warn("Could not open tasks doc:", err);
+        }
+        const { tasks } = await loadTasks(name);
+        const firstPending = tasks.find((t) => !t.completed) ?? tasks[0];
+        if (firstPending) {
+          const prompt = await buildStartTaskPrompt(name, firstPending.id);
+          await vscode.commands.executeCommand("workbench.action.chat.open", {
+            query: prompt,
+            mode: "agent",
+          });
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.toggleTaskRequired",
+      async (specNameArg?: unknown, taskIdArg?: unknown) => {
+        let specName: string | undefined;
+        let taskId: string | undefined;
+        if (typeof specNameArg === "string" && typeof taskIdArg === "string") {
+          specName = specNameArg;
+          taskId = taskIdArg;
+        } else {
+          const task = resolveTask(specNameArg);
+          specName = task?.specName;
+          taskId = task?.id;
+        }
+        if (!specName || !taskId) {
+          return;
+        }
+        const { toggleTaskRequired } = await import("./taskManager.js");
+        await toggleTaskRequired(specName, taskId);
+        refreshAll();
+      },
+    ],
+
+    [
+      "copilot-specs.runRequiredTasks",
+      async (specNameOrItem?: unknown) => {
+        let name =
+          typeof specNameOrItem === "string"
+            ? specNameOrItem
+            : resolveSpecName(specNameOrItem);
+
+        if (!name) {
+          const specs = await listSpecs();
+          if (specs.length === 0) {
+            return;
+          }
+          const pick = await vscode.window.showQuickPick(
+            specs.map((s) => ({ label: s.name, description: s.fileGlob })),
+            { placeHolder: "Select a spec to verify required tasks" },
+          );
+          if (!pick) {
+            return;
+          }
+          name = pick.label;
+        }
+
+        const prompt = await buildRunAllTasksVerificationPrompt(name, true);
+        await vscode.commands.executeCommand("workbench.action.chat.open", {
+          query: prompt,
+          mode: "agent",
         });
       },
     ],
@@ -575,9 +939,71 @@ export function activate(context: vscode.ExtensionContext): void {
     ],
 
     [
+      "copilot-specs.evaluateSteeringFile",
+      async (uri?: vscode.Uri) => {
+        const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
+        if (!targetUri) {
+          vscode.window.showErrorMessage("No file selected for evaluation.");
+          return;
+        }
+        
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Evaluating Chat Customization...",
+            cancellable: false,
+          },
+          async () => {
+            const diagnostics = await steeringEvaluator.evaluateFileUri(targetUri);
+            if (diagnostics.length === 0) {
+              vscode.window.showInformationMessage("✅ No steering issues found!");
+            } else {
+              vscode.window.showWarningMessage(
+                `Found ${diagnostics.length} issue(s). Check the Problems panel.`,
+              );
+              vscode.commands.executeCommand("workbench.action.problems.focus");
+            }
+          },
+        );
+      },
+    ],
+
+    [
+      "copilot-specs.evaluateAllSteering",
+      async () => {
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "Evaluating All Chat Customizations...",
+            cancellable: false,
+          },
+          async () => {
+            const total = await steeringEvaluator.evaluateWorkspace();
+            if (total === 0) {
+              vscode.window.showInformationMessage("✅ All steering files are valid!");
+            } else {
+              vscode.window.showWarningMessage(
+                `Found ${total} total steering issue(s). Check the Problems panel.`,
+              );
+              vscode.commands.executeCommand("workbench.action.problems.focus");
+            }
+          },
+        );
+      },
+    ],
+
+    [
       "copilot-specs.newPrompt",
       async () => {
         await promptNewSteering("prompt");
+        steeringProvider.refresh();
+      },
+    ],
+
+    [
+      "copilot-specs.newWorkflow",
+      async () => {
+        await promptNewSteering("workflow");
         steeringProvider.refresh();
       },
     ],
@@ -831,6 +1257,13 @@ export function activate(context: vscode.ExtensionContext): void {
     ],
 
     [
+      "copilot-specs.selectModel",
+      async () => {
+        await promptSelectModel();
+      },
+    ],
+
+    [
       "copilot-specs.openWorkspaceMcpConfig",
       async () => {
         const workspaceMcpPath = getPreferredWorkspaceMcpConfigPath();
@@ -1007,8 +1440,395 @@ export function activate(context: vscode.ExtensionContext): void {
         steeringProvider.refresh();
         hooksProvider.refresh();
         mcpServersProvider.refresh();
+        todoProvider.refresh();
       },
     ],
+
+    // ── Developer Todos Commands ──────────────────────────────────────────────
+    [
+      "copilot-specs.todo.refresh",
+      async () => {
+        await todoManager.refreshTodos();
+        vscode.window.showInformationMessage("Todos refreshed");
+      },
+    ],
+
+    [
+      "copilot-specs.todo.showFilterMenu",
+      async () => {
+        const currentMode = todoProvider.getFilterMode();
+        const options = [
+          { label: "$(list-unordered) All Todos", value: "all" as const, description: currentMode === "all" ? "(Current)" : "" },
+          { label: "$(circle-outline) Remaining Only", value: "remaining" as const, description: currentMode === "remaining" ? "(Current)" : "" },
+          { label: "$(check) Completed Only", value: "completed" as const, description: currentMode === "completed" ? "(Current)" : "" },
+          { label: "$(circle-slash) Ignored Only", value: "ignored" as const, description: currentMode === "ignored" ? "(Current)" : "" },
+        ];
+
+        const selected = await vscode.window.showQuickPick(options, {
+          placeHolder: "Select filter mode",
+        });
+
+        if (selected) {
+          todoProvider.setFilterMode(selected.value);
+          vscode.window.showInformationMessage(`Filter: ${selected.label.replace(/\$\([^)]+\)\s*/, "")}`);
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.filterAll",
+      () => {
+        todoProvider.setFilterMode("all");
+        vscode.window.showInformationMessage("Showing all todos");
+      },
+    ],
+
+    [
+      "copilot-specs.todo.filterRemaining",
+      () => {
+        todoProvider.setFilterMode("remaining");
+        vscode.window.showInformationMessage("Showing remaining todos only");
+      },
+    ],
+
+    [
+      "copilot-specs.todo.filterCompleted",
+      () => {
+        todoProvider.setFilterMode("completed");
+        vscode.window.showInformationMessage("Showing completed todos only");
+      },
+    ],
+
+    [
+      "copilot-specs.todo.filterIgnored",
+      () => {
+        todoProvider.setFilterMode("ignored");
+        vscode.window.showInformationMessage("Showing ignored todos only");
+      },
+    ],
+
+    [
+      "copilot-specs.todo.navigateToFile",
+      async (item: any) => {
+        if (item && item.todo) {
+          const todo: TodoInstance = item.todo;
+          if (!todo.filePath) {
+            vscode.window.showInformationMessage("This is a branch-level task (no file associated)");
+            return;
+          }
+          try {
+            const fileUri = vscode.Uri.file(todo.filePath);
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            await vscode.window.showTextDocument(document);
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              `Failed to open file: ${error instanceof Error ? error.message : "Unknown error"}`
+            );
+          }
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.completeTodo",
+      async (item: any) => {
+        if (item && item.todo) {
+          const todo: TodoInstance = item.todo;
+          await todoManager.completeTodo(todo.id);
+          vscode.window.showInformationMessage(`Completed: ${todo.name}`);
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.reopenTodo",
+      async (item: any) => {
+        if (item && item.todo) {
+          const todo: TodoInstance = item.todo;
+          await todoManager.reopenTodo(todo.id);
+          vscode.window.showInformationMessage(`Reopened: ${todo.name}`);
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.ignoreTodo",
+      async (item: any) => {
+        if (item && item.todo) {
+          const todo: TodoInstance = item.todo;
+          await todoManager.ignoreTodo(todo.id);
+          vscode.window.showInformationMessage(`Ignored: ${todo.name}`);
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.unignoreTodo",
+      async (item: any) => {
+        if (item && item.todo) {
+          const todo: TodoInstance = item.todo;
+          await todoManager.unignoreTodo(todo.id);
+          vscode.window.showInformationMessage(`Unignored: ${todo.name}`);
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.openFile",
+      async (todoArg?: unknown) => {
+        const todo = todoArg as TodoInstance | undefined;
+        if (!todo || !todo.filePath) {
+          return;
+        }
+        try {
+          const fileUri = vscode.Uri.file(todo.filePath);
+          const document = await vscode.workspace.openTextDocument(fileUri);
+          await vscode.window.showTextDocument(document);
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to open file: ${error instanceof Error ? error.message : "Unknown error"}`
+          );
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.showTemplate",
+      async (item: any) => {
+        if (item && item.todo) {
+          const todo: TodoInstance = item.todo;
+          if (todo.isManual) {
+            vscode.window.showInformationMessage(
+              `**${todo.name}**\n\n${todo.description}\n\nPriority: ${todo.priority}\nCreated by AI Agent`
+            );
+            return;
+          }
+          const template = todoManager
+            .getTemplates()
+            .find((t) => t.id === todo.templateId);
+
+          if (template) {
+            const message = `**${template.name}**\n\n${template.description}\n\n` +
+              `Pattern: \`${template.applyTo || "N/A"}\`\n` +
+              (template.fileContains ? `Contains: \`${template.fileContains}\`\n` : "") +
+              (template.excludeFileContains ? `Excludes: \`${template.excludeFileContains}\`\n` : "") +
+              `Priority: ${template.priority || "medium"}`;
+
+            vscode.window.showInformationMessage(message);
+          }
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.clearBranchTodos",
+      async () => {
+        const branch = gitTodoService.getCurrentBranch();
+        const result = await vscode.window.showWarningMessage(
+          `Clear all todos for branch "${branch}"?`,
+          { modal: true },
+          "Clear"
+        );
+
+        if (result === "Clear") {
+          await todoManager.clearBranchTodos();
+          vscode.window.showInformationMessage(`Cleared todos for ${branch}`);
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.openTriggeringFile",
+      async (relativePathArg?: unknown) => {
+        const relativePath = typeof relativePathArg === "string" ? relativePathArg : undefined;
+        if (!relativePath) {
+          return;
+        }
+
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage("No workspace folder open");
+          return;
+        }
+
+        try {
+          const fullPath = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+          const document = await vscode.workspace.openTextDocument(fullPath);
+          await vscode.window.showTextDocument(document);
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            `Failed to open file: ${error instanceof Error ? error.message : "Unknown error"}`
+          );
+        }
+      },
+    ],
+
+    [
+      "copilot-specs.todo.addTodo",
+      async () => {
+        const name = await vscode.window.showInputBox({
+          prompt: "Enter task name",
+          placeHolder: "e.g. Write unit tests for AuthService",
+        });
+        if (!name || !name.trim()) {
+          return;
+        }
+
+        const description = await vscode.window.showInputBox({
+          prompt: "Enter task description",
+          placeHolder: "e.g. Include test cases for success and error handling",
+        });
+        if (!description || !description.trim()) {
+          return;
+        }
+
+        const priorityPick = await vscode.window.showQuickPick(
+          [
+            { label: "🔴 High", value: "high" as const },
+            { label: "🟡 Medium", value: "medium" as const },
+            { label: "⚪ Low", value: "low" as const },
+          ],
+          { placeHolder: "Select priority" }
+        );
+
+        const priority = priorityPick ? priorityPick.value : "medium";
+        const activeEditor = vscode.window.activeTextEditor;
+        const filePath = activeEditor?.document.uri.scheme === "file" ? activeEditor.document.uri.fsPath : undefined;
+
+        await todoManager.addManualTodo(name.trim(), description.trim(), priority, filePath);
+        vscode.window.showInformationMessage(`Todo added: ${name}`);
+      },
+    ],
+
+    [
+      "copilot-specs.todo.createExampleConfig",
+      async () => {
+        await createExampleConfig(workspaceRoot);
+      },
+    ],
+
+    [
+      "copilot-specs.todo.selectPreset",
+      async () => {
+        const picks = TODO_PRESETS.map((p) => ({
+          label: `${p.icon} ${p.name}`,
+          description: p.description,
+          preset: p,
+        }));
+
+        const selected = await vscode.window.showQuickPick(picks, {
+          placeHolder: "Select a todo template preset to generate .todo.json",
+        });
+
+        if (!selected) {
+          return;
+        }
+
+        if (!workspaceRoot) {
+          vscode.window.showErrorMessage("No workspace folder open");
+          return;
+        }
+
+        const githubDir = path.join(workspaceRoot, ".github");
+        const configPath = path.join(githubDir, "todo.json");
+        try {
+          const fs = await import("node:fs");
+          if (!fs.existsSync(githubDir)) {
+            fs.mkdirSync(githubDir, { recursive: true });
+          }
+          fs.writeFileSync(configPath, JSON.stringify(selected.preset.config, null, 2), "utf-8");
+          vscode.window.showInformationMessage(
+            `Generated .github/todo.json using "${selected.preset.name}" preset!`
+          );
+          await todoManager.loadTemplates();
+          await todoManager.refreshTodos();
+          const doc = await vscode.workspace.openTextDocument(configPath);
+          await vscode.window.showTextDocument(doc);
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `Failed to write .todo.json: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      },
+    ],
+
+    ["copilot-specs.createPlanPromptFile", async (specName: string, reqContent: string, designContent: string, tasksContent: string) => {
+      const { createPlanPromptFile } = await import("./copilot/specGenerator.js");
+      await createPlanPromptFile(specName, reqContent ?? "", designContent ?? "", tasksContent ?? "");
+    }],
+    ["copilot-specs.runAutopilot", async (specName?: string) => {
+      const { runAutopilot } = await import("./autopilot.js");
+      await runAutopilot(specName);
+    }],
+    ["copilot-specs.analyzeRequirements", async (specNameArg?: unknown) => {
+      const specName = resolveSpecName(specNameArg) || resolveSpecNameFromActiveEditor();
+      if (!specName) {
+        vscode.window.showErrorMessage("Please select or open a spec requirements file first.");
+        return;
+      }
+      const spec = await loadSpec(specName);
+      if (!spec) { return; }
+      const reqUri = vscode.Uri.file(spec.requirementsPath);
+      const doc = await vscode.workspace.openTextDocument(reqUri);
+      await vscode.window.showTextDocument(doc);
+      void vscode.commands.executeCommand("workbench.action.chat.open", {
+        query: `@workspace Review the requirements in .github/specs/${specName}/requirements.instructions.md for completeness, clarity, testability, and edge cases. List any ambiguities or gaps in EARS criteria.`
+      });
+    }],
+    ["copilot-specs.syncTasks", async (specNameArg?: unknown) => {
+      const specName = resolveSpecName(specNameArg) || resolveSpecNameFromActiveEditor();
+      if (!specName) {
+        vscode.window.showErrorMessage("Please select or open a spec first.");
+        return;
+      }
+      void vscode.commands.executeCommand("workbench.action.chat.open", {
+        query: `@workspace Based on .github/specs/${specName}/requirements.instructions.md and design.instructions.md, update and synchronize implementation tasks in .github/specs/${specName}/tasks.instructions.md.`
+      });
+    }],
+    ["copilot-specs.checkCorrectness", async (specNameArg?: unknown) => {
+      const specName = resolveSpecName(specNameArg) || resolveSpecNameFromActiveEditor();
+      if (!specName) {
+        vscode.window.showErrorMessage("Please select or open a spec first.");
+        return;
+      }
+      void vscode.commands.executeCommand("workbench.action.chat.open", {
+        query: `@workspace Perform a correctness audit of the codebase against requirements in .github/specs/${specName}/requirements.instructions.md. Verify each acceptance criterion.`
+      });
+    }],
+    ["copilot-specs.jumpToNextTask", async (specNameArg?: unknown) => {
+      const specName = resolveSpecName(specNameArg) || resolveSpecNameFromActiveEditor();
+      if (!specName) {
+        vscode.window.showErrorMessage("Please select or open a spec first.");
+        return;
+      }
+      const { tasks } = await loadTasks(specName);
+      const firstIncomplete = tasks.find((t) => !t.completed);
+      const spec = await loadSpec(specName);
+      if (!spec) { return; }
+      const doc = await vscode.workspace.openTextDocument(spec.tasksPath);
+      const editor = await vscode.window.showTextDocument(doc);
+      if (firstIncomplete) {
+        const pos = new vscode.Position(firstIncomplete.lineIndex, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+      }
+    }],
+
+    // ── Legacy Command Aliases (for developerTodos.* compatibility) ───────────
+    ["developerTodos.refresh", async () => { await todoManager.refreshTodos(); }],
+    ["developerTodos.showFilterMenu", async () => { vscode.commands.executeCommand("copilot-specs.todo.showFilterMenu"); }],
+    ["developerTodos.filterAll", () => { todoProvider.setFilterMode("all"); }],
+    ["developerTodos.filterRemaining", () => { todoProvider.setFilterMode("remaining"); }],
+    ["developerTodos.filterCompleted", () => { todoProvider.setFilterMode("completed"); }],
+    ["developerTodos.filterIgnored", () => { todoProvider.setFilterMode("ignored"); }],
+    ["developerTodos.completeTodo", async (item: any) => { vscode.commands.executeCommand("copilot-specs.todo.completeTodo", item); }],
+    ["developerTodos.reopenTodo", async (item: any) => { vscode.commands.executeCommand("copilot-specs.todo.reopenTodo", item); }],
+    ["developerTodos.ignoreTodo", async (item: any) => { vscode.commands.executeCommand("copilot-specs.todo.ignoreTodo", item); }],
+    ["developerTodos.unignoreTodo", async (item: any) => { vscode.commands.executeCommand("copilot-specs.todo.unignoreTodo", item); }],
+    ["developerTodos.navigateToFile", async (item: any) => { vscode.commands.executeCommand("copilot-specs.todo.navigateToFile", item); }],
+    ["developerTodos.openFile", async (todo: any) => { vscode.commands.executeCommand("copilot-specs.todo.openFile", todo); }],
+    ["developerTodos.showTemplate", async (item: any) => { vscode.commands.executeCommand("copilot-specs.todo.showTemplate", item); }],
+    ["developerTodos.clearBranchTodos", async () => { vscode.commands.executeCommand("copilot-specs.todo.clearBranchTodos"); }],
   ];
 
   for (const [command, handler] of cmds) {
@@ -1048,13 +1868,82 @@ function resolveSpecName(item: unknown): string | undefined {
 }
 
 function resolveSpecNameFromActiveEditor(): string | undefined {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor) {
+  const activeDoc = vscode.window.activeTextEditor?.document;
+  if (!activeDoc) {
     return undefined;
   }
-  const normalized = editor.document.uri.fsPath.replace(/\\/g, "/");
-  const match = normalized.match(/\/\.github\/instructions\/specs\/([^/]+)\//i);
-  return match?.[1];
+  const match = activeDoc.uri.fsPath.match(
+    new RegExp(
+      `${SPECS_DIR.replace(/\//g, `\\${path.sep}`)}\\${path.sep}([^\\${path.sep}]+)`,
+    ),
+  );
+  return match ? match[1] : undefined;
+}
+
+async function createExampleConfig(workspaceRoot: string): Promise<void> {
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage("No workspace open to create .github/todo.json");
+    return;
+  }
+  const githubDir = path.join(workspaceRoot, ".github");
+  const configPath = path.join(githubDir, "todo.json");
+
+  const exampleConfig = {
+    templates: [
+      {
+        id: "apex-permission",
+        name: "Add Permission for the controller",
+        description: "User needs permission to use the apex controller",
+        applyTo: "force-app/main/default/classes/**/*.cls",
+        fileContains: "@AuraEnabled",
+        priority: "high",
+        aiInstruction: "Create or update a permission set to grant access to this Apex class. Add the class to the 'Apex Class Access' section of the permission set.",
+      },
+      {
+        id: "lwc-add-to-page",
+        name: "Add LWC on a page",
+        description: "The LWC needs to be added to a flexipage or similar to show up for the user",
+        applyTo: "force-app/main/default/lwc/**",
+        priority: "medium",
+        aiInstruction: "Add the Lightning Web Component to a Lightning App Page (flexipage), Record Page, or Home Page using the Lightning App Builder.",
+      },
+      {
+        id: "apex-test-class",
+        name: "Create test class",
+        description: "Add test coverage for the new Apex class",
+        applyTo: "force-app/main/default/classes/**/*.cls",
+        fileContains: "public class",
+        excludeFileContains: "@isTest",
+        priority: "high",
+        aiInstruction: "Create a test class with @isTest annotation. Include test methods for all public methods. Aim for at least 75% code coverage.",
+      },
+      {
+        id: "permission-set-to-group",
+        name: "Add to permission set group",
+        description: "New permission set should be added to a permission set group or assigned to users",
+        applyTo: "force-app/main/default/permissionsets/**/*.permissionset-meta.xml",
+        priority: "medium",
+        aiInstruction: "Add this permission set to an existing permission set group, or assign it directly to users who need access to the functionality it grants.",
+      },
+    ],
+  };
+
+  try {
+    const fs = await import("node:fs");
+    if (!fs.existsSync(githubDir)) {
+      fs.mkdirSync(githubDir, { recursive: true });
+    }
+    fs.writeFileSync(configPath, JSON.stringify(exampleConfig, null, 2), "utf-8");
+    vscode.window.showInformationMessage(
+      "Created example .github/todo.json. Customize it for your needs!"
+    );
+    const document = await vscode.workspace.openTextDocument(configPath);
+    await vscode.window.showTextDocument(document);
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Failed to create .todo.json: ${error instanceof Error ? error.message : "Unknown error"}`
+    );
+  }
 }
 
 function resolveTask(item: unknown): Task | undefined {
@@ -1157,7 +2046,11 @@ function shouldScheduleAutoLink(uri: vscode.Uri): boolean {
   }
 
   const normalized = uri.fsPath.replace(/\\/g, "/").toLowerCase();
-  if (normalized.endsWith("/implementation-tasks.instructions.md")) {
+  if (
+    normalized.endsWith("/tasks.instructions.md") ||
+    normalized.endsWith("/tasks.md") ||
+    normalized.endsWith("/implementation-tasks.instructions.md")
+  ) {
     return true;
   }
 

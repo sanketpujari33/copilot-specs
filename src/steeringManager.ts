@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "node:path";
 import {
   readTextFile,
   writeTextFile,
@@ -6,12 +7,27 @@ import {
   ensureDir,
   copilotInstructionsUri,
   resolveWorkspacePath,
+  listInstructionRulesFiles,
+  listSkillFiles,
+  listPromptFiles,
+  listAgentFiles,
+  listHookFiles,
+  listWorkflowFiles,
   PROMPTS_DIR,
+  AGENTS_DIR,
+  HOOKS_DIR,
+  WORKFLOWS_DIR,
 } from "./utils/fileSystem.js";
 
 const STEERING_START = "<!-- copilot-specs:steering:start -->";
 const STEERING_END = "<!-- copilot-specs:steering:end -->";
-type NewSteeringKind = "rules" | "skill" | "prompt";
+type NewSteeringKind =
+  | "rules"
+  | "skill"
+  | "prompt"
+  | "workflow"
+  | "agent"
+  | "hook";
 
 export interface SteeringData {
   name: string;
@@ -52,6 +68,42 @@ export async function readAllSteering(): Promise<SteeringData[]> {
   return entries;
 }
 
+export async function saveSteeringData(
+  entries: SteeringData[],
+): Promise<void> {
+  const uri = copilotInstructionsUri();
+  if (!uri) {
+    return;
+  }
+
+  let content = "";
+  if (await fileExists(uri)) {
+    content = await readTextFile(uri);
+  } else {
+    content = `# Copilot Instructions\n\n${STEERING_START}\n\n${STEERING_END}\n`;
+  }
+
+  const sectionsText = entries
+    .map((e) => `## ${e.name}\n\n${e.content}`)
+    .join("\n\n");
+  const managedContent = `${STEERING_START}\n\n${sectionsText}\n\n${STEERING_END}`;
+
+  const startIdx = content.indexOf(STEERING_START);
+  const endIdx = content.indexOf(STEERING_END);
+
+  let fileContent: string;
+  if (startIdx !== -1 && endIdx !== -1) {
+    fileContent =
+      content.slice(0, startIdx) +
+      managedContent +
+      content.slice(endIdx + STEERING_END.length);
+  } else {
+    fileContent = content.trimEnd() + "\n\n" + managedContent + "\n";
+  }
+
+  await writeTextFile(uri, fileContent);
+}
+
 export async function appendSteeringEntry(
   name: string,
   content: string,
@@ -89,11 +141,145 @@ export async function appendSteeringEntry(
 }
 
 export async function readSteeringForContext(): Promise<string> {
-  const uri = copilotInstructionsUri();
-  if (!uri || !(await fileExists(uri))) {
-    return "";
+  const parts: string[] = [];
+  const readPaths = new Set<string>();
+
+  // 1. copilot-instructions.md / AGENTS.md
+  const potentialInstructions = [
+    copilotInstructionsUri(),
+    resolveWorkspacePath(".github", "AGENTS.md"),
+    resolveWorkspacePath("AGENTS.md"),
+  ];
+
+  for (const uri of potentialInstructions) {
+    if (uri && (await fileExists(uri)) && !readPaths.has(uri.fsPath)) {
+      readPaths.add(uri.fsPath);
+      try {
+        const text = await readTextFile(uri);
+        if (text.trim()) {
+          parts.push(`### ${path.basename(uri.fsPath)}\n${text.trim()}`);
+        }
+      } catch {}
+    }
   }
-  return readTextFile(uri);
+
+  // 1b. Individual steering files (.github/steering/*.md)
+  try {
+    const { listSteeringFiles } = await import("./utils/fileSystem.js");
+    const steeringFiles = await listSteeringFiles();
+    for (const sf of steeringFiles) {
+      if (sf.uri && (await fileExists(sf.uri)) && !readPaths.has(sf.uri.fsPath)) {
+        readPaths.add(sf.uri.fsPath);
+        const text = await readTextFile(sf.uri);
+        if (text.trim()) {
+          parts.push(`### Steering: ${sf.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Instruction rules (.github/instructions/*.instructions.md)
+  try {
+    const rules = await listInstructionRulesFiles();
+    for (const rule of rules) {
+      if (rule.uri && (await fileExists(rule.uri)) && !readPaths.has(rule.uri.fsPath)) {
+        readPaths.add(rule.uri.fsPath);
+        const text = await readTextFile(rule.uri);
+        if (text.trim()) {
+          parts.push(`### Rule: ${rule.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Skills (.github/skills/*/SKILL.md)
+  try {
+    const skills = await listSkillFiles();
+    for (const skill of skills) {
+      if (skill.uri && (await fileExists(skill.uri)) && !readPaths.has(skill.uri.fsPath)) {
+        readPaths.add(skill.uri.fsPath);
+        const text = await readTextFile(skill.uri);
+        if (text.trim()) {
+          parts.push(`### Skill: ${skill.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  // 4. Prompts (.github/prompts/*.prompt.md)
+  try {
+    const prompts = await listPromptFiles();
+    for (const prompt of prompts) {
+      if (prompt.uri && (await fileExists(prompt.uri)) && !readPaths.has(prompt.uri.fsPath)) {
+        readPaths.add(prompt.uri.fsPath);
+        const text = await readTextFile(prompt.uri);
+        if (text.trim()) {
+          parts.push(`### Prompt: ${prompt.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  // 5. Agents (.github/agents/*.agent.md or AGENT.md)
+  try {
+    const agents = await listAgentFiles();
+    for (const agent of agents) {
+      if (agent.uri && (await fileExists(agent.uri)) && !readPaths.has(agent.uri.fsPath)) {
+        readPaths.add(agent.uri.fsPath);
+        const text = await readTextFile(agent.uri);
+        if (text.trim()) {
+          parts.push(`### Agent: ${agent.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  // 6. Hooks (.github/hooks/*.json)
+  try {
+    const hooks = await listHookFiles();
+    for (const hook of hooks) {
+      if (hook.uri && (await fileExists(hook.uri)) && !readPaths.has(hook.uri.fsPath)) {
+        readPaths.add(hook.uri.fsPath);
+        const text = await readTextFile(hook.uri);
+        if (text.trim()) {
+          parts.push(`### Hook: ${hook.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  // 7. Workflows (.github/workflows/*.yml)
+  try {
+    const workflows = await listWorkflowFiles();
+    for (const wf of workflows) {
+      if (wf.uri && (await fileExists(wf.uri)) && !readPaths.has(wf.uri.fsPath)) {
+        readPaths.add(wf.uri.fsPath);
+        const text = await readTextFile(wf.uri);
+        if (text.trim()) {
+          parts.push(`### Workflow: ${wf.name}\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  return parts.join("\n\n---\n\n");
+}
+
+export async function getPlanAgentsContext(): Promise<string> {
+  const planParts: string[] = [];
+  try {
+    const agents = await listAgentFiles();
+    for (const agent of agents) {
+      if (agent.uri && (await fileExists(agent.uri))) {
+        const text = await readTextFile(agent.uri);
+        if (text.trim()) {
+          planParts.push(`### Plan Agent (${agent.name}):\n${text.trim()}`);
+        }
+      }
+    }
+  } catch {}
+
+  return planParts.join("\n\n---\n\n");
 }
 
 export async function promptNewSteering(
@@ -118,6 +304,21 @@ export async function promptNewSteering(
             description: "New .prompt.md file in .github/prompts/",
             value: "prompt" as const,
           },
+          {
+            label: "$(workflow) Workflow",
+            description: "New workflow file in .github/workflows/",
+            value: "workflow" as const,
+          },
+          {
+            label: "$(person) Agent",
+            description: "New .agent.md file in .github/agents/",
+            value: "agent" as const,
+          },
+          {
+            label: "$(plug) Hook",
+            description: "New hook JSON configuration in .github/hooks/",
+            value: "hook" as const,
+          },
         ],
         { placeHolder: "What do you want to add?" },
       );
@@ -131,13 +332,25 @@ export async function promptNewSteering(
         ? "Rules file name (without extension)"
         : kind.value === "skill"
           ? "Skill name"
-          : "Prompt name (without extension)",
+          : kind.value === "workflow"
+            ? "Workflow name (e.g. ci, test-runner)"
+            : kind.value === "agent"
+              ? "Agent name"
+              : kind.value === "hook"
+                ? "Hook name"
+                : "Prompt name (without extension)",
     placeHolder:
       kind.value === "rules"
         ? 'e.g., "testing", "deployment"'
         : kind.value === "skill"
           ? 'e.g., "test-runner", "linter"'
-          : 'e.g., "review-pr", "summarize-diff"',
+          : kind.value === "workflow"
+            ? 'e.g., "ci", "copilot-agent-workflow"'
+            : kind.value === "agent"
+              ? 'e.g., "architect", "reviewer"'
+              : kind.value === "hook"
+                ? 'e.g., "on-task-start", "verify-build"'
+                : 'e.g., "review-pr", "summarize-diff"',
   });
   if (!name?.trim()) {
     return;
@@ -188,6 +401,94 @@ export async function promptNewSteering(
         uri,
         `---\nname: ${slug}\ndescription: Describe what this skill does and when Copilot should use it.\n---\n`,
       );
+    }
+    await vscode.commands.executeCommand("vscode.open", uri);
+  } else if (kind.value === "agent") {
+    const dir = resolveWorkspacePath(AGENTS_DIR);
+    if (dir) {
+      await ensureDir(dir);
+    }
+    const uri = resolveWorkspacePath(`${AGENTS_DIR}/${slug}.agent.md`);
+    if (!uri) {
+      return;
+    }
+    if (await fileExists(uri)) {
+      vscode.window.showWarningMessage(
+        `Agent file "${slug}.agent.md" already exists.`,
+      );
+    } else {
+      await writeTextFile(
+        uri,
+        `---\nname: ${slug}\ndescription: Describe the specialized agent instructions.\ntools: []\n---\n\n# ${name.trim()} Agent\n\n> Define guidelines and behaviors for this agent.\n`,
+      );
+    }
+    await vscode.commands.executeCommand("vscode.open", uri);
+  } else if (kind.value === "hook") {
+    const dir = resolveWorkspacePath(HOOKS_DIR);
+    if (dir) {
+      await ensureDir(dir);
+    }
+    const uri = resolveWorkspacePath(`${HOOKS_DIR}/${slug}.json`);
+    if (!uri) {
+      return;
+    }
+    if (await fileExists(uri)) {
+      vscode.window.showWarningMessage(
+        `Hook file "${slug}.json" already exists.`,
+      );
+    } else {
+      const hookContent = JSON.stringify(
+        {
+          name: slug,
+          description: `Custom hook for ${name.trim()}`,
+          events: ["onTaskStart", "onTaskComplete"],
+          action: "vscode.commands.executeCommand",
+          command: "workbench.action.tasks.runTask",
+        },
+        null,
+        2,
+      );
+      await writeTextFile(uri, hookContent);
+    }
+    await vscode.commands.executeCommand("vscode.open", uri);
+  } else if (kind.value === "workflow") {
+    const dir = resolveWorkspacePath(WORKFLOWS_DIR);
+    if (dir) {
+      await ensureDir(dir);
+    }
+    const uri = resolveWorkspacePath(`${WORKFLOWS_DIR}/${slug}.yml`);
+    if (!uri) {
+      return;
+    }
+    if (await fileExists(uri)) {
+      vscode.window.showWarningMessage(
+        `Workflow file "${slug}.yml" already exists.`,
+      );
+    } else {
+      const template = [
+        `name: ${name.trim()}`,
+        `on:`,
+        `  push:`,
+        `    branches: [ main, master ]`,
+        `  pull_request:`,
+        `    branches: [ main, master ]`,
+        ``,
+        `jobs:`,
+        `  build-and-test:`,
+        `    runs-on: ubuntu-latest`,
+        `    steps:`,
+        `      - uses: actions/checkout@v4`,
+        `      - name: Setup Node.js`,
+        `        uses: actions/setup-node@v4`,
+        `        with:`,
+        `          node-version: 20`,
+        `      - name: Install dependencies`,
+        `        run: npm ci`,
+        `      - name: Run tests`,
+        `        run: npm test`,
+        ``,
+      ].join("\n");
+      await writeTextFile(uri, template);
     }
     await vscode.commands.executeCommand("vscode.open", uri);
   } else {

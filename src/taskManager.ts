@@ -10,12 +10,13 @@ import {
   listDirectories,
 } from "./utils/fileSystem.js";
 
-// Regex patterns for task parsing — match any markdown checkbox line (including [x]*)
-const TASK_LINE = /^(\s*)-\s+\[(x\*?|X\*?| )\]\s+(.+)$/;
-const SUBTASK_LINE = /^(\s{2,})-\s+\[(x\*?|X\*?| )\]\s+(.+)$/;
-const NUMBERED_SUBTASK_LINE = /^(\s*)-\s+\[(x\*?|X\*?| )\]\s+(\d+\.\d+)\s+(.+)$/;
+// Regex patterns for task parsing
+// Group 1: leading whitespace, Group 2: checkbox marker (inside []), Group 3: trailing * (optional, outside []), Group 4: task text
+const TASK_LINE = /^(\s*)-\s+\[(x|X|\*|-|~| )\](\*?)\s+(.+)$/;
+const SUBTASK_LINE = /^(\s{2,})-\s+\[(x|X|\*|-|~| )\](\*?)\s+(.+)$/;
+const NUMBERED_SUBTASK_LINE = /^(\s*)-\s+\[(x|X|\*|-|~| )\](\*?)\s+(\d+\.\d+)\s+(.+)$/;
 // Heading-style tasks: ### T1: Title, ### - [ ] T1: Title, or ### - [x] T1: Title
-const HEADING_TASK_LINE = /^###\s+(?:-\s+\[(x\*?|X\*?| )\]\s+)?(.+)$/;
+const HEADING_TASK_LINE = /^###\s+(?:-\s+\[(x|X|\*|-|~| )\](\*?)\s+)?(.+)$/;
 const PHASE_HEADER = /^###\s+(Phase\s+[^\n<!--]+)/i;
 const FILES_COMMENT = /<!--\s*files:\s*(.+?)\s*-->/;
 const TASK_ID_COMMENT = /<!--\s*task:\s*(\S+)\s*-->/;
@@ -89,10 +90,13 @@ export function parseTasks(
     const numSubMatch = line.match(NUMBERED_SUBTASK_LINE);
     if (numSubMatch && currentTask && !line.trim().startsWith("###")) {
       const checkVal = numSubMatch[2].toLowerCase();
+      const trailingAsterisk = numSubMatch[3] === "*";
       const sub: SubTask = {
-        title: `${numSubMatch[3]} ${numSubMatch[4].trim()}`,
-        completed: checkVal.startsWith("x"),
-        autoVerified: checkVal.includes("*"),
+        title: `${numSubMatch[4]} ${numSubMatch[5].trim()}`,
+        completed: checkVal === "x" || checkVal === "*",
+        inProgress: checkVal === "-",
+        queued: checkVal === "~",
+        optional: trailingAsterisk,
         lineIndex: i,
       };
       currentTask.subTasks.push(sub);
@@ -102,10 +106,13 @@ export function parseTasks(
     const subtaskMatch = line.match(SUBTASK_LINE);
     if (subtaskMatch && currentTask) {
       const checkVal = subtaskMatch[2].toLowerCase();
+      const trailingAsterisk = subtaskMatch[3] === "*";
       const sub: SubTask = {
-        title: subtaskMatch[3].trim(),
-        completed: checkVal.startsWith("x"),
-        autoVerified: checkVal.includes("*"),
+        title: subtaskMatch[4].trim(),
+        completed: checkVal === "x" || checkVal === "*",
+        inProgress: checkVal === "-",
+        queued: checkVal === "~",
+        optional: trailingAsterisk,
         lineIndex: i,
       };
       currentTask.subTasks.push(sub);
@@ -117,7 +124,8 @@ export function parseTasks(
     if (headingTaskMatch && !line.match(/^###\s+Phase/i)) {
       taskCounter++;
       const explicitCheckbox = headingTaskMatch[1];
-      let titlePart = headingTaskMatch[2].trim();
+      const headingTrailingAsterisk = headingTaskMatch[2] === "*";
+      let titlePart = headingTaskMatch[3].trim();
 
       let id: string | undefined;
       const commentId = titlePart.match(TASK_ID_COMMENT);
@@ -162,8 +170,10 @@ export function parseTasks(
       currentTask = {
         id,
         title: titlePart,
-        completed: explicitCheckVal.startsWith("x"),
-        autoVerified: explicitCheckVal.includes("*"),
+        completed: explicitCheckVal === "x" || explicitCheckVal === "*",
+        inProgress: explicitCheckVal === "-",
+        queued: explicitCheckVal === "~",
+        optional: headingTrailingAsterisk,
         specName,
         lineIndex: i,
         subTasks: [],
@@ -179,10 +189,13 @@ export function parseTasks(
     if (taskMatch) {
       if (currentHeadingTask) {
         const checkVal = taskMatch[2].toLowerCase();
+        const trailingAsterisk = taskMatch[3] === "*";
         const sub: SubTask = {
-          title: taskMatch[3].trim(),
-          completed: checkVal.startsWith("x"),
-          autoVerified: checkVal.includes("*"),
+          title: taskMatch[4].trim(),
+          completed: checkVal === "x" || checkVal === "*",
+          inProgress: checkVal === "-",
+          queued: checkVal === "~",
+          optional: trailingAsterisk,
           lineIndex: i,
         };
         currentHeadingTask.subTasks.push(sub);
@@ -190,7 +203,7 @@ export function parseTasks(
       }
 
       taskCounter++;
-      let titlePart = taskMatch[3].trim();
+      let titlePart = taskMatch[4].trim();
 
       let id: string | undefined;
       const commentId = titlePart.match(TASK_ID_COMMENT);
@@ -202,6 +215,13 @@ export function parseTasks(
       if (!id && boldId) {
         id = boldId[1];
         titlePart = titlePart.replace(BOLD_ID, "").trim();
+      }
+      if (!id) {
+        const colonId = titlePart.match(/^(\S+?):\s+/);
+        if (colonId) {
+          id = colonId[1];
+          titlePart = titlePart.replace(/^\S+?:\s+/, "").trim();
+        }
       }
       if (!id) {
         id = `T${taskCounter}`;
@@ -226,11 +246,14 @@ export function parseTasks(
       }
 
       const checkVal = taskMatch[2].toLowerCase();
+      const trailingAsterisk = taskMatch[3] === "*";
       currentTask = {
         id,
         title: titlePart,
-        completed: checkVal.startsWith("x"),
-        autoVerified: checkVal.includes("*"),
+        completed: checkVal === "x" || checkVal === "*",
+        inProgress: checkVal === "-",
+        queued: checkVal === "~",
+        optional: trailingAsterisk,
         specName,
         lineIndex: i,
         subTasks: [],
@@ -252,7 +275,7 @@ export function parseTasks(
   }
 
   // For heading-style tasks without explicit checkbox, derive completed state from subtasks
-  const HEADING_EXPLICIT_CHECKBOX = /^###\s+-\s+\[(x\*?|X\*?| )\]/;
+  const HEADING_EXPLICIT_CHECKBOX = /^###\s+-\s+\[(x|X|\*|-|~| )\]/;
   for (const task of tasks) {
     const taskLine = lines[task.lineIndex]?.trimStart() ?? "";
     if (
@@ -325,9 +348,9 @@ export async function setTaskCompleted(
     return;
   }
 
-  const newMark = completed ? "x" : " ";
+  const newMark = completed ? "*" : " ";
   lines[task.lineIndex] = lines[task.lineIndex].replace(
-    /\[(x| )\]/,
+    /\[(x\*?|X\*?|\*|-|~| )\]/,
     `[${newMark}]`,
   );
 
@@ -359,22 +382,22 @@ export async function markTaskAndSubtasksCompleted(
     return;
   }
 
-  const newMark = completed ? "x" : " ";
-  const HEADING_EXPLICIT = /^###\s+-\s+\[(x| )\]/;
+  const newMark = completed ? "*" : " ";
+  const HEADING_EXPLICIT = /^###\s+-\s+\[(x\*?|X\*?|\*|-|~| )\]/;
 
   // Update the parent line — always for checkbox tasks; only when the heading
   // carries an explicit checkbox for heading-style tasks.
   const parentLine = lines[task.lineIndex] ?? "";
   const isHeading = parentLine.trimStart().startsWith("###");
   if (!isHeading || HEADING_EXPLICIT.test(parentLine.trimStart())) {
-    lines[task.lineIndex] = parentLine.replace(/\[(x| )\]/, `[${newMark}]`);
+    lines[task.lineIndex] = parentLine.replace(/\[(x\*?|X\*?|\*|-|~| )\]/, `[${newMark}]`);
   }
 
   // Update every subtask line.
   for (const sub of task.subTasks) {
     if (sub.lineIndex >= 0 && sub.lineIndex < lines.length) {
       lines[sub.lineIndex] = lines[sub.lineIndex].replace(
-        /\[(x| )\]/,
+        /\[(x\*?|X\*?|\*|-|~| )\]/,
         `[${newMark}]`,
       );
     }
@@ -401,7 +424,7 @@ export function applyCompletedIds(
 
   for (const task of newTasks) {
     if (completedIds.has(task.id) && !task.completed) {
-      lines[task.lineIndex] = lines[task.lineIndex].replace(/\[(x| )\]/, "[x]");
+      lines[task.lineIndex] = lines[task.lineIndex].replace(/\[(x\*?|X\*?|\*|-|~| )\]/, "[*]");
     }
   }
 
@@ -438,17 +461,52 @@ export async function toggleTaskRequired(
 
   const line = lines[task.lineIndex];
   let newLine = line;
-  if (line.includes("- [ ]*")) {
-    newLine = line.replace("- [ ]*", "- [ ]");
-  } else if (line.includes("- [ ]")) {
-    newLine = line.replace("- [ ]", "- [ ]*");
-  } else if (line.includes("- [x]*")) {
-    newLine = line.replace("- [x]*", "- [x]");
-  } else if (line.includes("- [x]")) {
-    newLine = line.replace("- [x]", "- [x]*");
+  // Toggle trailing * (optional) for all task states
+  const CHECKBOX_OPTIONAL = /(-\s+\[(x|X|\*|-|~| )\])\*/;
+  const CHECKBOX_REQUIRED = /(-\s+\[(x|X|\*|-|~| )\])(?!\*)/;
+  if (CHECKBOX_OPTIONAL.test(line)) {
+    newLine = line.replace(CHECKBOX_OPTIONAL, "$1");  // remove trailing *, making it required
+  } else if (CHECKBOX_REQUIRED.test(line)) {
+    newLine = line.replace(CHECKBOX_REQUIRED, "$1*");  // add trailing *, making it optional
   }
 
   lines[task.lineIndex] = newLine;
+  await writeTextFile(uri, lines.join("\n"));
+}
+
+export async function toggleSubTaskRequired(
+  specName: string,
+  lineIndex: number,
+): Promise<void> {
+  const { loadSpec } = await import("./specManager.js");
+  const spec = await loadSpec(specName);
+  if (!spec) {
+    return;
+  }
+
+  const uri = vscode.Uri.file(spec.tasksPath);
+  if (!(await fileExists(uri))) {
+    return;
+  }
+
+  const content = await readTextFile(uri);
+  const lines = content.split("\n");
+  
+  if (lineIndex < 0 || lineIndex >= lines.length) {
+    return;
+  }
+
+  const line = lines[lineIndex];
+  let newLine = line;
+  const CHECKBOX_OPTIONAL = /(-\s+\[(x|X|\*|-|~| )\])\*/;
+  const CHECKBOX_REQUIRED = /(-\s+\[(x|X|\*|-|~| )\])(?!\*)/;
+  if (CHECKBOX_OPTIONAL.test(line)) {
+    newLine = line.replace(CHECKBOX_OPTIONAL, "$1");  // remove trailing *, making it required
+  } else if (CHECKBOX_REQUIRED.test(line)) {
+    newLine = line.replace(CHECKBOX_REQUIRED, "$1*");  // add trailing *, making it optional
+  }
+
+  lines[lineIndex] = newLine;
   await writeTextFile(uri, lines.join("\n"));
 }
 
@@ -530,10 +588,10 @@ export function validateTaskMarkdown(content: string): TaskValidationIssue[] {
     const checkboxCandidate = line.match(/^(\s*)-\s+\[(.{1})\]/);
     if (checkboxCandidate) {
       const marker = checkboxCandidate[2];
-      if (!/^(x|X| )$/.test(marker)) {
+      if (!/^(x|X|\*|-|~| )$/.test(marker)) {
         issues.push({
           line: i,
-          message: `Invalid checkbox marker "[${marker}]" — use "[ ]" or "[x]".`,
+          message: `Invalid checkbox marker "[${marker}]" — use "[ ]", "[*]", "[-]", or "[~]".`,
           severity: "error",
         });
       }
